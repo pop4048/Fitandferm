@@ -14,11 +14,27 @@ const INITIAL_USERS = [
 ];
 
 // --- Firebase Initialization ---
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'pastelfit-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
+// เปลี่ยน appId เป็นชื่อโปรเจกต์ของคุณ
+const appId = 'pastelfit-my-app'; 
+
+// นำ firebaseConfig ที่ได้จาก Firebase Console มาวางทับตรงนี้
+const firebaseConfig = {
+  apiKey: "AIzaSy_รหัสของคุณ_xxxxxxxxxxxxx",
+  authDomain: "pastelfit-app-xxxx.firebaseapp.com",
+  projectId: "pastelfit-app-xxxx",
+  storageBucket: "pastelfit-app-xxxx.appspot.com",
+  messagingSenderId: "1234567890",
+  appId: "1:1234567890:web:abcdef123456"
+};
+
+const isLocalMode = firebaseConfig.apiKey.includes("รหัสของคุณ");
+
+let app, db, auth;
+if (!isLocalMode) {
+  app = initializeApp(firebaseConfig);
+  db = getFirestore(app);
+  auth = getAuth(app);
+}
 // -------------------------------
 
 export default function PastelFitApp() {
@@ -36,6 +52,11 @@ export default function PastelFitApp() {
   const [coachNotes, setCoachNotes] = useState({});
 
   useEffect(() => {
+    if (isLocalMode) {
+      setFirebaseUser({ uid: 'local-mode' });
+      return;
+    }
+
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -56,6 +77,17 @@ export default function PastelFitApp() {
   }, []);
 
   useEffect(() => {
+    if (isLocalMode) {
+      // จำลองข้อมูลเริ่มต้นสำหรับการพรีวิวหากไม่มี Firebase
+      setUsers(INITIAL_USERS);
+      setTdeeData({
+        'u1': { bmr: 1254, tdee: 1505, targetCalories: 1505, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } },
+        'u2': { bmr: 1793, tdee: 2779, targetCalories: 2279, profile: { gender: 'male', age: 30, height: 175, weight: 80, activity: '1.55', goal: 'lose' } },
+        'u3': { bmr: 1289, tdee: 1772, targetCalories: 1200, profile: { gender: 'female', age: 40, height: 155, weight: 65, activity: '1.375', goal: 'lose_fast' } }
+      });
+      return;
+    }
+
     if (!firebaseUser) return;
 
     const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
@@ -338,7 +370,9 @@ export default function PastelFitApp() {
 
     const results = { bmr: Math.round(bmr), tdee, targetCalories: target, profile: localProfile };
     
-    if (firebaseUser) {
+    if (isLocalMode) {
+      setTdeeData(prev => ({...prev, [uid]: results}));
+    } else if (firebaseUser) {
       setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), results);
     }
     
@@ -585,7 +619,9 @@ Ensure the response is a pure JSON string.`;
         ...editForm
       };
       
-      if (firebaseUser) {
+      if (isLocalMode) {
+        setFoodLogs(prev => [newLog, ...prev]);
+      } else if (firebaseUser) {
         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
       }
       
@@ -740,7 +776,9 @@ Ensure the response is a pure JSON string.`;
     const deleteLog = (id) => {
       if(isReadOnly) return;
       
-      if (firebaseUser) {
+      if (isLocalMode) {
+        setFoodLogs(prev => prev.filter(log => log.id !== id));
+      } else if (firebaseUser) {
         deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', id));
       }
     };
@@ -849,7 +887,9 @@ Ensure the response is a pure JSON string.`;
       if(!form.weight || !form.waist || isReadOnly) return;
       const newRecord = { id: generateId(), userId: uid, date: getTodayString(), ...form };
       
-      if (firebaseUser) {
+      if (isLocalMode) {
+        setMeasurements(prev => [newRecord, ...prev]);
+      } else if (firebaseUser) {
         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', newRecord.id), newRecord);
       }
       
@@ -989,7 +1029,12 @@ Ensure the response is a pure JSON string.`;
         password: newUserForm.password
       };
       
-      if (firebaseUser) {
+      if (isLocalMode) {
+        setUsers(prev => [...prev, newUser]);
+        if (newUser.role === 'user') {
+          setTdeeData(prev => ({...prev, [newId]: { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } }}));
+        }
+      } else if (firebaseUser) {
         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', newId), newUser);
         if (newUser.role === 'user') {
           setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', newId), { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } });
@@ -1000,7 +1045,9 @@ Ensure the response is a pure JSON string.`;
     };
 
     const handleDeleteUser = (userId) => {
-      if (firebaseUser) {
+      if (isLocalMode) {
+        setUsers(prev => prev.filter(u => u.id !== userId));
+      } else if (firebaseUser) {
         deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', userId));
       }
       setConfirmDeleteId(null);
@@ -1009,7 +1056,9 @@ Ensure the response is a pure JSON string.`;
     const saveCoachNote = (userId) => {
       const key = `${userId}_${summaryDate}`;
       
-      if (firebaseUser) {
+      if (isLocalMode) {
+         setCoachNotes(prev => ({...prev, [key]: tempNoteText}));
+      } else if (firebaseUser) {
          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'coachNotes', key), { text: tempNoteText });
       }
       
