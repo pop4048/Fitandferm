@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from 'firebase/firestore';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const getTodayString = () => new Date().toISOString().split('T')[0];
@@ -10,42 +13,91 @@ const INITIAL_USERS = [
   { id: 'admin1', name: 'Admin (ผู้ดูแลระบบ)', role: 'admin', password: 'admin' }
 ];
 
+// --- Firebase Initialization ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'pastelfit-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+// -------------------------------
+
 export default function PastelFitApp() {
+  const [firebaseUser, setFirebaseUser] = useState(null);
   const [currentUser, setCurrentUser] = useState(null); 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [viewingUserId, setViewingUserId] = useState(null); 
   const [loginError, setLoginError] = useState(''); 
 
-  // App States (Global)
-  const [users, setUsers] = useState(INITIAL_USERS);
-  const [foodLogs, setFoodLogs] = useState([
-    { id: 'fl1', userId: 'u2', date: getTodayString(), timestamp: new Date().toISOString(), name: 'ข้าวกะเพราหมูกรอบ', calories: 850, protein: 25, carbs: 60, fat: 45, meal: 'lunch' },
-    { id: 'fl2', userId: 'u3', date: getTodayString(), timestamp: new Date().toISOString(), name: 'สลัดอกไก่', calories: 350, protein: 35, carbs: 15, fat: 10, meal: 'dinner' },
-  ]);
-  const [measurements, setMeasurements] = useState([
-    { id: 'm1', userId: 'u2', date: getTodayString(), weight: 79, waist: 34, height: 175, chest: 40, arm: 13, leg: 22, neck: 15 }
-  ]);
-  const [tdeeData, setTdeeData] = useState({
-    'u1': { bmr: 1254, tdee: 1505, targetCalories: 1505, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } },
-    'u2': { bmr: 1793, tdee: 2779, targetCalories: 2279, profile: { gender: 'male', age: 30, height: 175, weight: 80, activity: '1.55', goal: 'lose' } },
-    'u3': { bmr: 1289, tdee: 1772, targetCalories: 1200, profile: { gender: 'female', age: 40, height: 155, weight: 65, activity: '1.375', goal: 'lose_fast' } }
-  });
+  // App States (Global - ซิงค์ผ่าน Firebase)
+  const [users, setUsers] = useState([]);
+  const [foodLogs, setFoodLogs] = useState([]);
+  const [measurements, setMeasurements] = useState([]);
+  const [tdeeData, setTdeeData] = useState({});
+  const [coachNotes, setCoachNotes] = useState({});
 
   useEffect(() => {
-    const cleanOldImages = () => {
-      const now = new Date();
-      const sevenDaysAgo = new Date(now.setDate(now.getDate() - 7));
-      
-      setFoodLogs(prev => prev.map(log => {
-        const logDate = new Date(log.timestamp);
-        if (log.imageUrl && logDate < sevenDaysAgo) {
-          return { ...log, imageUrl: null, note: '(รูปภาพถูกลบอัตโนมัติตามกำหนด 7 วัน)' };
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
         }
-        return log;
-      }));
+      } catch (error) {
+        console.error("Firebase Auth Error:", error);
+      }
     };
-    cleanOldImages();
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, user => {
+      setFirebaseUser(user);
+    });
+    return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
+    const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'foodLogs');
+    const measRef = collection(db, 'artifacts', appId, 'public', 'data', 'measurements');
+    const tdeeRef = collection(db, 'artifacts', appId, 'public', 'data', 'tdeeData');
+    const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'coachNotes');
+
+    const unsubUsers = onSnapshot(usersRef, (snap) => {
+      if (snap.empty) {
+        // Seed initial data ถ้าฐานข้อมูลว่างเปล่า
+        INITIAL_USERS.forEach(u => setDoc(doc(usersRef, u.id), u));
+        setDoc(doc(tdeeRef, 'u1'), { bmr: 1254, tdee: 1505, targetCalories: 1505, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } });
+        setDoc(doc(tdeeRef, 'u2'), { bmr: 1793, tdee: 2779, targetCalories: 2279, profile: { gender: 'male', age: 30, height: 175, weight: 80, activity: '1.55', goal: 'lose' } });
+        setDoc(doc(tdeeRef, 'u3'), { bmr: 1289, tdee: 1772, targetCalories: 1200, profile: { gender: 'female', age: 40, height: 155, weight: 65, activity: '1.375', goal: 'lose_fast' } });
+      } else {
+        setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+    }, console.error);
+
+    const unsubLogs = onSnapshot(logsRef, (snap) => {
+      setFoodLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
+    }, console.error);
+
+    const unsubMeas = onSnapshot(measRef, (snap) => {
+      setMeasurements(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, console.error);
+
+    const unsubTdee = onSnapshot(tdeeRef, (snap) => {
+      const tdeeObj = {};
+      snap.docs.forEach(d => tdeeObj[d.id] = d.data());
+      setTdeeData(tdeeObj);
+    }, console.error);
+
+    const unsubNotes = onSnapshot(notesRef, (snap) => {
+      const notesObj = {};
+      snap.docs.forEach(d => notesObj[d.id] = d.data().text);
+      setCoachNotes(notesObj);
+    }, console.error);
+
+    return () => { unsubUsers(); unsubLogs(); unsubMeas(); unsubTdee(); unsubNotes(); };
+  }, [firebaseUser]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -265,30 +317,33 @@ export default function PastelFitApp() {
     const [localProfile, setLocalProfile] = useState(currentData.profile || defaultProfile);
 
     const calculateTDEE = () => {
-      if (isReadOnly) return;
-      let bmr = 0;
-      if (localProfile.gender === 'male') {
-        bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) + 5;
-      } else {
-        bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) - 161;
-      }
-      
-      const tdee = Math.round(bmr * parseFloat(localProfile.activity));
-      
-      let target = tdee;
-      if (localProfile.goal === 'lose_fast') target -= 1000;
-      else if (localProfile.goal === 'lose') target -= 500;
-      else if (localProfile.goal === 'gain') target += 500;
-      else if (localProfile.goal === 'gain_fast') target += 1000;
-      
-      if (localProfile.gender === 'female' && target < 1200) target = 1200;
-      if (localProfile.gender === 'male' && target < 1500) target = 1500;
+    if (isReadOnly) return;
+    let bmr = 0;
+    if (localProfile.gender === 'male') {
+      bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) + 5;
+    } else {
+      bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) - 161;
+    }
+    
+    const tdee = Math.round(bmr * parseFloat(localProfile.activity));
+    
+    let target = tdee;
+    if (localProfile.goal === 'lose_fast') target -= 1000;
+    else if (localProfile.goal === 'lose') target -= 500;
+    else if (localProfile.goal === 'gain') target += 500;
+    else if (localProfile.goal === 'gain_fast') target += 1000;
+    
+    if (localProfile.gender === 'female' && target < 1200) target = 1200;
+    if (localProfile.gender === 'male' && target < 1500) target = 1500;
 
-      const results = { bmr: Math.round(bmr), tdee, targetCalories: target, profile: localProfile };
-      setTdeeData(prev => ({ ...prev, [uid]: results }));
-      
-      const btn = document.getElementById('calc-btn');
-      if (btn) {
+    const results = { bmr: Math.round(bmr), tdee, targetCalories: target, profile: localProfile };
+    
+    if (firebaseUser) {
+      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), results);
+    }
+    
+    const btn = document.getElementById('calc-btn');
+    if (btn) {
         const originalText = btn.innerText;
         btn.innerText = 'บันทึกสำเร็จ! ✨';
         btn.classList.add('bg-green-400');
@@ -529,7 +584,11 @@ Ensure the response is a pure JSON string.`;
         imageUrl: image,
         ...editForm
       };
-      setFoodLogs(prev => [newLog, ...prev]);
+      
+      if (firebaseUser) {
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
+      }
+      
       setActiveTab('dashboard');
     };
 
@@ -680,7 +739,10 @@ Ensure the response is a pure JSON string.`;
 
     const deleteLog = (id) => {
       if(isReadOnly) return;
-      setFoodLogs(prev => prev.filter(l => l.id !== id));
+      
+      if (firebaseUser) {
+        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', id));
+      }
     };
 
     return (
@@ -786,7 +848,11 @@ Ensure the response is a pure JSON string.`;
     const saveMeasurement = () => {
       if(!form.weight || !form.waist || isReadOnly) return;
       const newRecord = { id: generateId(), userId: uid, date: getTodayString(), ...form };
-      setMeasurements(prev => [newRecord, ...prev]);
+      
+      if (firebaseUser) {
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', newRecord.id), newRecord);
+      }
+      
       setForm({ weight: '', height: '', waist: '', chest: '', arm: '', leg: '', neck: '' });
       
       const btn = document.getElementById('measure-btn');
@@ -903,7 +969,6 @@ Ensure the response is a pure JSON string.`;
     const [coachTab, setCoachTab] = useState('daily-summary'); 
     const [summaryDate, setSummaryDate] = useState(getTodayString());
     const [filterStatus, setFilterStatus] = useState('all'); 
-    const [coachNotes, setCoachNotes] = useState({}); 
     const [editingNoteUserId, setEditingNoteUserId] = useState(null);
     const [tempNoteText, setTempNoteText] = useState('');
 
@@ -924,25 +989,30 @@ Ensure the response is a pure JSON string.`;
         password: newUserForm.password
       };
       
-      setUsers([...users, newUser]);
-      setNewUserForm({ name: '', password: '', role: 'user' });
-      
-      if (newUser.role === 'user') {
-        setTdeeData(prev => ({
-          ...prev,
-          [newId]: { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } }
-        }));
+      if (firebaseUser) {
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', newId), newUser);
+        if (newUser.role === 'user') {
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', newId), { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } });
+        }
       }
+      
+      setNewUserForm({ name: '', password: '', role: 'user' });
     };
 
     const handleDeleteUser = (userId) => {
-      setUsers(users.filter(u => u.id !== userId));
+      if (firebaseUser) {
+        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', userId));
+      }
       setConfirmDeleteId(null);
     };
 
     const saveCoachNote = (userId) => {
       const key = `${userId}_${summaryDate}`;
-      setCoachNotes(prev => ({ ...prev, [key]: tempNoteText }));
+      
+      if (firebaseUser) {
+         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'coachNotes', key), { text: tempNoteText });
+      }
+      
       setEditingNoteUserId(null);
       setTempNoteText('');
     };
