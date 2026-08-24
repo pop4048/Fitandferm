@@ -9,7 +9,8 @@ const INITIAL_USERS = [
   { id: 'u1', name: 'น้องพาสเทล', role: 'user', password: '123' },
   { id: 'u2', name: 'คุณสมชาย', role: 'user', password: '123' },
   { id: 'u3', name: 'พี่สมศรี', role: 'user', password: '123' },
-  { id: 'c1', name: 'Coach ฟ้าใส', role: 'coach', password: 'admin' }
+  { id: 'c1', name: 'Coach Beem', role: 'coach', password: 'admin' }
+  { id: 'c2', name: 'Coach POP', role: 'coach', password: 'password' }
 ];
 
 export default function PastelFitApp() {
