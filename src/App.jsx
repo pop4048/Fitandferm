@@ -312,11 +312,21 @@ export default function PastelFitApp() {
 
     const saveFoodLog = () => {
       const newLog = {
-        id: generateId(), userId: currentUser.id, date: getTodayString(), timestamp: new Date().toISOString(),
-        meal: mealType, imageUrl: image, ...editForm
+        id: generateId(), 
+        userId: currentUser.id, 
+        date: getTodayString(), 
+        timestamp: new Date().toISOString(),
+        meal: mealType, 
+        // นำ imageUrl ออกเพื่อป้องกันปัญหาขนาดไฟล์เกินโควต้า
+        ...editForm
       };
       if (isLocal) setFoodLogs(prev => [newLog, ...prev]);
       else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
+      
+      // ล้างค่ารูปภาพหลังจากบันทึกเสร็จ เพื่อเคลียร์หน่วยความจำ
+      setImage(null);
+      setPredictions(null);
+      
       setActiveTab('dashboard');
     };
 
