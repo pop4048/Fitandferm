@@ -18,12 +18,12 @@ const appId = 'pastelfit-my-app';
 
 // 🚨 นำ firebaseConfig ของคุณมาใส่ตรงนี้ 🚨
 const firebaseConfig = {
-  apiKey: "AIzaSy_รหัสของคุณ_xxxxxxxxxxxxx",
-  authDomain: "pastelfit-app-xxxx.firebaseapp.com",
-  projectId: "pastelfit-app-xxxx",
-  storageBucket: "pastelfit-app-xxxx.appspot.com",
-  messagingSenderId: "1234567890",
-  appId: "1:1234567890:web:abcdef123456"
+  apiKey: "AIzaSyBQl9xUuXyZGpJAX8PyByImmRYQ9mH0L9Q",
+  authDomain: "fitandferm.firebaseapp.com",
+  projectId: "fitandferm",
+  storageBucket: "fitandferm.firebasestorage.app",
+  messagingSenderId: "443086319784",
+  appId: "1:443086319784:web:7a02893627fc0df853929d"
 };
 
 const isLocalMode = firebaseConfig.apiKey.includes("รหัสของคุณ");
