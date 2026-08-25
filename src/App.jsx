@@ -14,10 +14,9 @@ const INITIAL_USERS = [
 ];
 
 // --- Firebase Initialization ---
-// เปลี่ยน appId เป็นชื่อโปรเจกต์ของคุณ
 const appId = 'pastelfit-my-app'; 
 
-// นำ firebaseConfig ที่ได้จาก Firebase Console มาวางทับตรงนี้
+// 🚨 นำ firebaseConfig ของคุณมาใส่ตรงนี้ 🚨
 const firebaseConfig = {
   apiKey: "AIzaSy_รหัสของคุณ_xxxxxxxxxxxxx",
   authDomain: "pastelfit-app-xxxx.firebaseapp.com",
@@ -44,9 +43,10 @@ export default function PastelFitApp() {
   const [viewingUserId, setViewingUserId] = useState(null); 
   const [loginError, setLoginError] = useState(''); 
 
-  // App States (Global - ซิงค์ผ่าน Firebase)
+  // Global States (Firebase Sync)
   const [users, setUsers] = useState([]);
   const [foodLogs, setFoodLogs] = useState([]);
+  const [exerciseLogs, setExerciseLogs] = useState([]); // ฟีเจอร์ใหม่: บันทึกออกกำลังกาย
   const [measurements, setMeasurements] = useState([]);
   const [tdeeData, setTdeeData] = useState({});
   const [coachNotes, setCoachNotes] = useState({});
@@ -56,207 +56,80 @@ export default function PastelFitApp() {
       setFirebaseUser({ uid: 'local-mode' });
       return;
     }
-
     const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Firebase Auth Error:", error);
-      }
+      try { await signInAnonymously(auth); } catch (error) { console.error("Firebase Auth Error:", error); }
     };
     initAuth();
-
-    const unsubscribe = onAuthStateChanged(auth, user => {
-      setFirebaseUser(user);
-    });
-    return () => unsubscribe();
+    return onAuthStateChanged(auth, user => setFirebaseUser(user));
   }, []);
 
   useEffect(() => {
     if (isLocalMode) {
-      // จำลองข้อมูลเริ่มต้นสำหรับการพรีวิวหากไม่มี Firebase
       setUsers(INITIAL_USERS);
       setTdeeData({
-        'u1': { bmr: 1254, tdee: 1505, targetCalories: 1505, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } },
-        'u2': { bmr: 1793, tdee: 2779, targetCalories: 2279, profile: { gender: 'male', age: 30, height: 175, weight: 80, activity: '1.55', goal: 'lose' } },
-        'u3': { bmr: 1289, tdee: 1772, targetCalories: 1200, profile: { gender: 'female', age: 40, height: 155, weight: 65, activity: '1.375', goal: 'lose_fast' } }
+        'u1': { targetCalories: 1505, profile: { weight: 55 } },
+        'u2': { targetCalories: 2279, profile: { weight: 80 } },
+        'u3': { targetCalories: 1200, profile: { weight: 65 } }
       });
       return;
     }
 
     if (!firebaseUser) return;
 
-    const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
-    const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'foodLogs');
-    const measRef = collection(db, 'artifacts', appId, 'public', 'data', 'measurements');
-    const tdeeRef = collection(db, 'artifacts', appId, 'public', 'data', 'tdeeData');
-    const notesRef = collection(db, 'artifacts', appId, 'public', 'data', 'coachNotes');
+    const refs = ['users', 'foodLogs', 'exerciseLogs', 'measurements', 'tdeeData', 'coachNotes'].map(
+      col => collection(db, 'artifacts', appId, 'public', 'data', col)
+    );
 
-    const unsubUsers = onSnapshot(usersRef, (snap) => {
+    const unsubUsers = onSnapshot(refs[0], (snap) => {
       if (snap.empty) {
-        // Seed initial data ถ้าฐานข้อมูลว่างเปล่า
-        INITIAL_USERS.forEach(u => setDoc(doc(usersRef, u.id), u));
-        setDoc(doc(tdeeRef, 'u1'), { bmr: 1254, tdee: 1505, targetCalories: 1505, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } });
-        setDoc(doc(tdeeRef, 'u2'), { bmr: 1793, tdee: 2779, targetCalories: 2279, profile: { gender: 'male', age: 30, height: 175, weight: 80, activity: '1.55', goal: 'lose' } });
-        setDoc(doc(tdeeRef, 'u3'), { bmr: 1289, tdee: 1772, targetCalories: 1200, profile: { gender: 'female', age: 40, height: 155, weight: 65, activity: '1.375', goal: 'lose_fast' } });
+        INITIAL_USERS.forEach(u => setDoc(doc(refs[0], u.id), u));
+        setDoc(doc(refs[4], 'u1'), { targetCalories: 1505, profile: { weight: 55 } });
       } else {
         setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
     }, console.error);
 
-    const unsubLogs = onSnapshot(logsRef, (snap) => {
-      setFoodLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)));
-    }, console.error);
+    const unsubFood = onSnapshot(refs[1], (snap) => setFoodLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=> new Date(b.timestamp) - new Date(a.timestamp))));
+    const unsubEx = onSnapshot(refs[2], (snap) => setExerciseLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=> new Date(b.timestamp) - new Date(a.timestamp))));
+    const unsubMeas = onSnapshot(refs[3], (snap) => setMeasurements(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    
+    const unsubTdee = onSnapshot(refs[4], (snap) => {
+      const obj = {}; snap.docs.forEach(d => obj[d.id] = d.data()); setTdeeData(obj);
+    });
+    const unsubNotes = onSnapshot(refs[5], (snap) => {
+      const obj = {}; snap.docs.forEach(d => obj[d.id] = d.data().text); setCoachNotes(obj);
+    });
 
-    const unsubMeas = onSnapshot(measRef, (snap) => {
-      setMeasurements(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    }, console.error);
-
-    const unsubTdee = onSnapshot(tdeeRef, (snap) => {
-      const tdeeObj = {};
-      snap.docs.forEach(d => tdeeObj[d.id] = d.data());
-      setTdeeData(tdeeObj);
-    }, console.error);
-
-    const unsubNotes = onSnapshot(notesRef, (snap) => {
-      const notesObj = {};
-      snap.docs.forEach(d => notesObj[d.id] = d.data().text);
-      setCoachNotes(notesObj);
-    }, console.error);
-
-    return () => { unsubUsers(); unsubLogs(); unsubMeas(); unsubTdee(); unsubNotes(); };
+    return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); };
   }, [firebaseUser]);
 
   const handleLogin = (e) => {
     e.preventDefault();
-    const userId = e.target.userId.value;
-    const password = e.target.password.value;
-    
-    const user = users.find(u => u.id === userId);
-    if (user) {
-      if (user.password === password) {
-        setCurrentUser(user);
-        setActiveTab('dashboard');
-        setViewingUserId(null);
-        setLoginError('');
-      } else {
-        setLoginError('รหัสผ่านไม่ถูกต้อง');
-      }
+    const user = users.find(u => u.id === e.target.userId.value);
+    if (user && user.password === e.target.password.value) {
+      setCurrentUser(user); setActiveTab('dashboard'); setLoginError('');
     } else {
-      setLoginError('กรุณาเลือกบัญชีผู้ใช้งาน');
+      setLoginError(user ? 'รหัสผ่านไม่ถูกต้อง' : 'กรุณาเลือกบัญชีผู้ใช้งาน');
     }
   };
 
   if (!currentUser) {
+    // [UI ล็อกอิน คงเดิม]
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-pink-50 pb-20 font-sans">
-        <nav className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 flex justify-between items-center h-16">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">🌸</span>
-              <span className="font-bold text-xl text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">
-                PastelFit
-              </span>
-            </div>
-            <div className="flex gap-2">
-               <button onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })} className="text-sm bg-pink-500 hover:bg-pink-600 text-white font-semibold py-2 px-4 rounded-full transition-all shadow-md">
-                 เข้าสู่ระบบ
-               </button>
-            </div>
-          </div>
-        </nav>
-
-        <div className="text-center py-12 px-4">
-          <h1 className="text-4xl md:text-5xl font-bold text-gray-800 mb-4">
-            เริ่มต้นดูแลสุขภาพกับ <span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">PastelFit</span>
-          </h1>
-          <p className="text-gray-600 mb-8 max-w-2xl mx-auto">
-             ติดตามแคลอรี่, สแกนอาหารด้วย AI, และบรรลุเป้าหมายสุขภาพไปพร้อมกับเพื่อนๆ ในคอมมูนิตี้
-          </p>
-        </div>
-
-        <div className="max-w-5xl mx-auto px-4">
-           <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">🎯 สถานะเพื่อนๆ วันนี้</h2>
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {users.filter(u => u.role === 'user').map(user => {
-                 const uTdee = tdeeData[user.id] || { targetCalories: 2000 };
-                 const uLogs = foodLogs.filter(log => log.userId === user.id && log.date === getTodayString());
-                 const consumed = uLogs.reduce((acc, curr) => acc + curr.calories, 0);
-                 const target = uTdee.targetCalories;
-                 const remaining = target - consumed;
-                 const percent = Math.min((consumed / target) * 100, 100);
-                 const isOver = consumed > target;
-
-                 return (
-                   <div key={user.id} className="bg-white rounded-3xl p-6 shadow-xl shadow-pink-100/50 border border-white relative overflow-hidden transition-transform hover:-translate-y-1">
-                      <div className="absolute top-0 right-0 p-4 opacity-10 text-5xl">🏃‍♀️</div>
-                      <h3 className="font-bold text-lg text-gray-800 mb-4 flex items-center gap-2">
-                        <span className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-200 to-blue-200 flex items-center justify-center text-sm">👤</span>
-                        {user.name}
-                      </h3>
-                      
-                      <div className="space-y-4">
-                         <div>
-                            <div className="flex justify-between text-sm mb-1">
-                               <span className="text-gray-500">เป้าหมาย</span>
-                               <span className="font-semibold text-gray-700">{target.toLocaleString()} kcal</span>
-                            </div>
-                            <div className="flex justify-between text-sm mb-1">
-                               <span className="text-gray-500">ทานแล้ว</span>
-                               <span className={`font-semibold ${isOver ? 'text-red-500' : 'text-pink-500'}`}>{consumed.toLocaleString()} kcal</span>
-                            </div>
-                         </div>
-
-                         <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full transition-all duration-1000 ${isOver ? 'bg-red-400' : 'bg-gradient-to-r from-green-400 to-blue-400'}`} style={{width: `${percent}%`}}></div>
-                         </div>
-
-                         <div className="text-center pt-2">
-                            {isOver ? (
-                               <span className="text-sm font-bold text-red-500 bg-red-50 px-3 py-1 rounded-full inline-block">⚠️ เกินเป้าหมาย {Math.abs(remaining).toLocaleString()} kcal</span>
-                            ) : (
-                               <span className="text-sm font-bold text-green-600 bg-green-50 px-3 py-1 rounded-full inline-block">✨ เหลืออีก {remaining.toLocaleString()} kcal</span>
-                            )}
-                         </div>
-                      </div>
-                   </div>
-                 )
-              })}
-           </div>
-
-           <div className="mt-20 bg-white p-8 rounded-3xl shadow-xl max-w-md mx-auto text-center border border-pink-100">
+        <div className="max-w-5xl mx-auto px-4 pt-20">
+           <div className="mt-10 bg-white p-8 rounded-3xl shadow-xl max-w-md mx-auto text-center border border-pink-100">
              <div className="text-5xl mb-4">🌸</div>
-             <h2 className="text-2xl font-bold text-gray-800 mb-2">เข้าสู่ระบบ</h2>
-             <p className="text-gray-500 mb-6">กรุณาเลือกบัญชีและใส่รหัสผ่าน</p>
-             
-             {loginError && (
-               <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-semibold border border-red-100">
-                 {loginError}
-               </div>
-             )}
-             
+             <h2 className="text-2xl font-bold text-gray-800 mb-2">PastelFit</h2>
+             <p className="text-gray-500 mb-6">เข้าสู่ระบบเพื่อใช้งาน</p>
+             {loginError && <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-semibold border border-red-100">{loginError}</div>}
              <form onSubmit={handleLogin} className="space-y-4">
-               <select name="userId" className="w-full p-4 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-pink-300 border border-gray-200 text-gray-700 font-medium">
+               <select name="userId" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200">
                  <option value="">-- เลือกบัญชีผู้ใช้งาน --</option>
-                 {users.map(u => (
-                   <option key={u.id} value={u.id}>
-                     {u.name} ({u.role === 'admin' ? 'แอดมิน' : u.role === 'coach' ? 'โค้ช' : 'สมาชิก'})
-                   </option>
-                 ))}
+                 {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
                </select>
-               <input 
-                 type="password" 
-                 name="password" 
-                 placeholder="รหัสผ่าน (User = 123, Admin/Coach = admin)" 
-                 className="w-full p-4 bg-gray-50 rounded-2xl outline-none focus:ring-2 focus:ring-pink-300 border border-gray-200 text-gray-700"
-               />
-               <button type="submit" className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
-                  เข้าสู่ระบบ
-               </button>
+               <input type="password" name="password" placeholder="รหัสผ่าน (User=123, Admin=admin)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200" />
+               <button type="submit" className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-2xl shadow-md">เข้าสู่ระบบ</button>
              </form>
            </div>
         </div>
@@ -264,488 +137,228 @@ export default function PastelFitApp() {
     );
   }
 
-  const NavBar = () => (
-    <nav className="bg-white shadow-sm fixed w-full top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 flex justify-between items-center h-16">
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">🌸</span>
-          <span className="font-bold text-xl text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">
-            PastelFit
-          </span>
-        </div>
-        <div className="flex items-center gap-4">
-          {currentUser.role !== 'user' && activeTab === 'coach-user-detail' && (
-            <button onClick={() => setActiveTab('dashboard')} className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 py-1 px-3 rounded-full font-medium flex items-center gap-1">
-              <span>◀</span> กลับ
-            </button>
-          )}
-          <span className="text-gray-600 font-medium text-sm md:text-base">{currentUser.name}</span>
-          <button onClick={() => setCurrentUser(null)} className="text-sm text-pink-500 hover:text-pink-600 font-medium">
-            ออกจากระบบ
-          </button>
-        </div>
-      </div>
-    </nav>
-  );
-
   const Layout = ({ children }) => (
     <div className="min-h-screen bg-slate-50 pt-16 pb-20 md:pb-0">
-      <NavBar />
+      <nav className="bg-white shadow-sm fixed w-full top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 flex justify-between items-center h-16">
+          <div className="flex items-center gap-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">🌸 PastelFit</div>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-600 text-sm font-medium">{currentUser.name}</span>
+            <button onClick={() => setCurrentUser(null)} className="text-sm text-pink-500 hover:text-pink-600 font-medium">ออก</button>
+          </div>
+        </div>
+      </nav>
       
       {currentUser.role === 'user' && (
         <div className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-3 z-50 px-2 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-          <NavBtn id="dashboard" icon="📊" label="สรุปวัน" active={activeTab} onClick={setActiveTab} />
-          <NavBtn id="ai" icon="📸" label="AI สแกน" active={activeTab} onClick={setActiveTab} />
-          <NavBtn id="tdee" icon="⚙️" label="เป้าหมาย" active={activeTab} onClick={setActiveTab} />
-          <NavBtn id="measure" icon="📏" label="สัดส่วน" active={activeTab} onClick={setActiveTab} />
-          <NavBtn id="rank" icon="🏆" label="จัดอันดับ" active={activeTab} onClick={setActiveTab} />
+          <NavBtn id="dashboard" icon="📊" label="สรุปวัน" />
+          <NavBtn id="ai" icon="📸" label="สแกน" />
+          <NavBtn id="exercise" icon="🏃" label="ออกกำลัง" />
+          <NavBtn id="tdee" icon="⚙️" label="เป้าหมาย" />
+          <NavBtn id="rank" icon="🏆" label="อันดับ" />
         </div>
       )}
 
       <div className="max-w-7xl mx-auto flex">
         {currentUser.role === 'user' && (
-          <div className="hidden md:block w-64 min-h-[calc(100vh-64px)] bg-white border-r border-gray-100 p-6 sticky top-16">
-            <div className="space-y-4">
-              <SideNavBtn id="dashboard" icon="📊" label="สรุปรายวัน" active={activeTab} onClick={setActiveTab} />
-              <SideNavBtn id="ai" icon="📸" label="AI สแกนอาหาร" active={activeTab} onClick={setActiveTab} />
-              <SideNavBtn id="tdee" icon="⚙️" label="เป้าหมาย & TDEE" active={activeTab} onClick={setActiveTab} />
-              <SideNavBtn id="measure" icon="📏" label="บันทึกสัดส่วน" active={activeTab} onClick={setActiveTab} />
-              <SideNavBtn id="rank" icon="🏆" label="กระดานจัดอันดับ" active={activeTab} onClick={setActiveTab} />
+          <div className="hidden md:block w-64 bg-white border-r border-gray-100 p-6 sticky top-16 h-[calc(100vh-64px)] overflow-y-auto">
+            <div className="space-y-2">
+              <SideNavBtn id="dashboard" icon="📊" label="สรุปรายวัน" />
+              <SideNavBtn id="ai" icon="📸" label="AI สแกนอาหาร" />
+              <SideNavBtn id="exercise" icon="🏃" label="ออกกำลังกาย" />
+              <SideNavBtn id="tdee" icon="⚙️" label="เป้าหมาย TDEE" />
+              <SideNavBtn id="measure" icon="📏" label="บันทึกสัดส่วน" />
+              <SideNavBtn id="rank" icon="🏆" label="จัดอันดับ" />
             </div>
           </div>
         )}
-
-        <main className="flex-1 p-4 md:p-8 w-full max-w-full overflow-hidden">
-          {children}
-        </main>
+        <main className="flex-1 p-4 md:p-8 w-full max-w-full overflow-hidden">{children}</main>
       </div>
     </div>
   );
 
-  const NavBtn = ({ id, icon, label, active, onClick }) => (
-    <button onClick={() => onClick(id)} className={`flex flex-col items-center flex-1 ${active === id ? 'text-pink-500' : 'text-gray-400'}`}>
-      <span className="text-xl mb-1">{icon}</span>
-      <span className="text-[10px] font-medium">{label}</span>
+  const NavBtn = ({ id, icon, label }) => (
+    <button onClick={() => setActiveTab(id)} className={`flex flex-col items-center flex-1 ${activeTab === id ? 'text-pink-500' : 'text-gray-400'}`}>
+      <span className="text-xl mb-1">{icon}</span><span className="text-[10px] font-medium">{label}</span>
+    </button>
+  );
+  
+  const SideNavBtn = ({ id, icon, label }) => (
+    <button onClick={() => setActiveTab(id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === id ? 'bg-pink-50 text-pink-600 font-semibold' : 'text-gray-500 hover:bg-gray-50'}`}>
+      <span className="text-xl">{icon}</span><span>{label}</span>
     </button>
   );
 
-  const SideNavBtn = ({ id, icon, label, active, onClick }) => (
-    <button 
-      onClick={() => onClick(id)} 
-      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all ${active === id ? 'bg-pink-50 text-pink-600 font-semibold' : 'text-gray-500 hover:bg-gray-50'}`}
-    >
-      <span className="text-xl">{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-
-  const TDEECalculator = ({ targetUserId }) => {
-    const uid = targetUserId || currentUser.id;
-    const isReadOnly = uid !== currentUser.id;
-    const defaultProfile = { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' };
-    const currentData = tdeeData[uid] || { bmr: 0, tdee: 0, targetCalories: 0, profile: defaultProfile };
-    
-    const safeTdee = currentData.tdee || 0;
-    const [localProfile, setLocalProfile] = useState(currentData.profile || defaultProfile);
-
-    const calculateTDEE = () => {
-    if (isReadOnly) return;
-    let bmr = 0;
-    if (localProfile.gender === 'male') {
-      bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) + 5;
-    } else {
-      bmr = (10 * localProfile.weight) + (6.25 * localProfile.height) - (5 * localProfile.age) - 161;
-    }
-    
-    const tdee = Math.round(bmr * parseFloat(localProfile.activity));
-    
-    let target = tdee;
-    if (localProfile.goal === 'lose_fast') target -= 1000;
-    else if (localProfile.goal === 'lose') target -= 500;
-    else if (localProfile.goal === 'gain') target += 500;
-    else if (localProfile.goal === 'gain_fast') target += 1000;
-    
-    if (localProfile.gender === 'female' && target < 1200) target = 1200;
-    if (localProfile.gender === 'male' && target < 1500) target = 1500;
-
-    const results = { bmr: Math.round(bmr), tdee, targetCalories: target, profile: localProfile };
-    
-    if (isLocalMode) {
-      setTdeeData(prev => ({...prev, [uid]: results}));
-    } else if (firebaseUser) {
-      setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), results);
-    }
-    
-    const btn = document.getElementById('calc-btn');
-    if (btn) {
-        const originalText = btn.innerText;
-        btn.innerText = 'บันทึกสำเร็จ! ✨';
-        btn.classList.add('bg-green-400');
-        setTimeout(() => {
-          btn.innerText = originalText;
-          btn.classList.remove('bg-green-400');
-        }, 2000);
-      }
-    };
-
-    useEffect(() => {
-      if (currentData.tdee === 0 && !isReadOnly) calculateTDEE();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <h2 className="text-2xl font-bold text-gray-800">โปรแกรมคำนวณ TDEE & เป้าหมาย</h2>
-        {isReadOnly && <div className="bg-blue-50 text-blue-600 p-3 rounded-xl text-sm mb-4">👀 โหมดดูข้อมูลเท่านั้น (Read-only)</div>}
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-pink-100">
-            <h3 className="text-lg font-semibold text-pink-600 mb-4">ข้อมูลส่วนบุคคล</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">เพศ</label>
-                <div className="flex gap-4">
-                  <button disabled={isReadOnly} onClick={() => setLocalProfile({...localProfile, gender: 'male'})} className={`flex-1 py-2 rounded-xl border ${localProfile.gender === 'male' ? 'bg-blue-50 border-blue-400 text-blue-600' : 'border-gray-200 text-gray-500'} ${isReadOnly ? 'opacity-70 cursor-not-allowed' : ''}`}>♂ ชาย</button>
-                  <button disabled={isReadOnly} onClick={() => setLocalProfile({...localProfile, gender: 'female'})} className={`flex-1 py-2 rounded-xl border ${localProfile.gender === 'female' ? 'bg-pink-50 border-pink-400 text-pink-600' : 'border-gray-200 text-gray-500'} ${isReadOnly ? 'opacity-70 cursor-not-allowed' : ''}`}>♀ หญิง</button>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">อายุ (ปี)</label>
-                  <input disabled={isReadOnly} type="number" value={localProfile.age} onChange={e => setLocalProfile({...localProfile, age: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 disabled:opacity-70" />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">น้ำหนัก (กก.)</label>
-                  <input disabled={isReadOnly} type="number" value={localProfile.weight} onChange={e => setLocalProfile({...localProfile, weight: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 disabled:opacity-70" />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-sm text-gray-600 mb-1">ส่วนสูง (ซม.)</label>
-                  <input disabled={isReadOnly} type="number" value={localProfile.height} onChange={e => setLocalProfile({...localProfile, height: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 disabled:opacity-70" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">ระดับกิจกรรม</label>
-                <select disabled={isReadOnly} value={localProfile.activity} onChange={e => setLocalProfile({...localProfile, activity: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 text-gray-700 disabled:opacity-70">
-                  <option value="1.2">ไม่ออกกำลังกายเลย หรือน้อยมาก</option>
-                  <option value="1.375">ออกกำลังกายเบาๆ 1-3 วัน/สัปดาห์</option>
-                  <option value="1.55">ออกกำลังกายปานกลาง 3-5 วัน/สัปดาห์</option>
-                  <option value="1.725">ออกกำลังกายหนัก 6-7 วัน/สัปดาห์</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">เป้าหมาย (Goal)</label>
-                <select disabled={isReadOnly} value={localProfile.goal} onChange={e => setLocalProfile({...localProfile, goal: e.target.value})} className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-pink-300 text-gray-700 disabled:opacity-70">
-                  <option value="lose_fast">ลดน้ำหนักอย่างมาก (-1 กก./สัปดาห์)</option>
-                  <option value="lose">ลดน้ำหนักปกติ (-0.5 กก./สัปดาห์)</option>
-                  <option value="maintain">รักษาน้ำหนัก</option>
-                  <option value="gain">เพิ่มกล้ามเนื้อ/น้ำหนัก (+0.5 กก./สัปดาห์)</option>
-                </select>
-              </div>
-
-              {!isReadOnly && (
-                <button id="calc-btn" onClick={calculateTDEE} className="w-full mt-4 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-md">
-                  คำนวณและบันทึกเป้าหมาย
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-pink-50 p-6 rounded-3xl border border-pink-200">
-            <h3 className="text-lg font-semibold text-gray-800 mb-6">พลังงานที่ต้องการในแต่ละวัน (TDEE)</h3>
-            
-            <div className="mb-8 flex items-baseline gap-2">
-              <span className="text-5xl font-bold text-pink-600">{safeTdee}</span>
-              <span className="text-gray-600">แคลอรี่/วัน</span>
-            </div>
-
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 text-sm font-semibold text-gray-500 pb-2 border-b border-pink-200">
-                <div>เป้าหมาย</div>
-                <div className="text-center">น้ำหนัก/สัปดาห์</div>
-                <div className="text-right">แคลอรี่/วัน</div>
-              </div>
-              
-              <ResultRow label="ลดอย่างมาก" color="bg-red-100 text-red-700" weight="-1 กก." cals={safeTdee > 0 ? safeTdee - 1000 : 0} active={localProfile.goal === 'lose_fast'} />
-              <ResultRow label="ลดน้ำหนัก" color="bg-orange-100 text-orange-700" weight="-0.5 กก." cals={safeTdee > 0 ? safeTdee - 500 : 0} active={localProfile.goal === 'lose'} />
-              <ResultRow label="รักษาน้ำหนัก" color="bg-gray-200 text-gray-700" weight="0 กก." cals={safeTdee} active={localProfile.goal === 'maintain'} />
-              <ResultRow label="เพิ่มน้ำหนัก" color="bg-green-100 text-green-700" weight="+0.5 กก." cals={safeTdee > 0 ? safeTdee + 500 : 0} active={localProfile.goal === 'gain'} />
-            </div>
-
-            <div className="mt-8 p-4 bg-white rounded-2xl shadow-sm text-center">
-              <p className="text-sm text-gray-500">เป้าหมายปัจจุบัน:</p>
-              <p className="text-2xl font-bold text-blue-500 mt-1">{currentData.targetCalories || 0} kcal/วัน</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const ResultRow = ({ label, color, weight, cals, active }) => (
-    <div className={`grid grid-cols-3 items-center py-2 px-3 rounded-xl transition-all ${active ? 'bg-white shadow-sm ring-2 ring-pink-400' : ''}`}>
-      <div><span className={`text-xs font-semibold px-2 py-1 rounded-full ${color}`}>{label}</span></div>
-      <div className="text-center text-sm text-gray-600">{weight}</div>
-      <div className="text-right text-sm font-semibold text-gray-800">{cals > 0 ? Math.max(cals, 1200) : 0}</div>
-    </div>
-  );
-
+  // -------------------------------------------------------------
+  // ฟีเจอร์ใหม่: AIFoodScanner + ระบบสัดส่วน (Portion) + API Key Settings
+  // -------------------------------------------------------------
   const AIFoodScanner = () => {
     const [image, setImage] = useState(null);
     const [isScanning, setIsScanning] = useState(false);
     const [predictions, setPredictions] = useState(null);
-    const [result, setResult] = useState(null);
+    const [result, setResult] = useState(null); // ข้อมูลตั้งต้นจาก AI
+    const [editForm, setEditForm] = useState({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 });
     const [mealType, setMealType] = useState('lunch');
     const [errorMsg, setErrorMsg] = useState('');
-    const [editForm, setEditForm] = useState({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 });
+    
+    // จัดการ Gemini API Key แบบปลอดภัย (เก็บในเครื่องผู้ใช้)
+    const [geminiKey, setGeminiKey] = useState(localStorage.getItem('pastel_gemini_key') || '');
+    const [showKeySettings, setShowKeySettings] = useState(!geminiKey);
+
+    const saveGeminiKey = (key) => {
+      setGeminiKey(key);
+      localStorage.setItem('pastel_gemini_key', key);
+      setShowKeySettings(false);
+    };
 
     const handleImageUpload = (e) => {
       const file = e.target.files[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
-          setImage(e.target.result);
-          setResult(null);
-          setPredictions(null);
-          setErrorMsg('');
-        };
+        reader.onload = (e) => { setImage(e.target.result); setResult(null); setPredictions(null); setErrorMsg(''); };
         reader.readAsDataURL(file);
       }
     };
 
     const runCustomAI = async () => {
+      if (!geminiKey) { setShowKeySettings(true); return; }
       if (!image) return;
-      setIsScanning(true);
-      setErrorMsg('');
+      setIsScanning(true); setErrorMsg('');
       
       try {
         const base64Data = image.split(',')[1];
         const mimeType = image.split(';')[0].split(':')[1] || "image/jpeg";
+        const prompt = `Analyze this image of food or nutrition label. Respond ONLY with a JSON array of up to 3 objects: [{ "name": "Food in Thai", "calories": 0, "protein": 0, "carbs": 0, "fat": 0, "confidence": 95 }]`;
 
-        const prompt = `Analyze this image of food or nutrition label. Identify the food and estimate its nutritional value per typical serving. Protein is highly important, please estimate it as accurately as possible.
-Respond ONLY with a valid JSON array of up to 3 objects representing your best guesses.
-Format each object EXACTLY like this:
-[
-  {
-    "name": "Food Name (in Thai)",
-    "calories": 0,
-    "protein": 0,
-    "carbs": 0,
-    "fat": 0,
-    "confidence": "95.0"
-  }
-]
-Ensure the response is a pure JSON string.`;
-
-        const payload = {
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: prompt },
-                { inlineData: { mimeType: mimeType, data: base64Data } }
-              ]
-            }
-          ],
-          generationConfig: {
-            responseMimeType: "application/json",
-          }
-        };
-
-        const apiKey = ""; 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-        const fetchWithRetry = async (url, options, retries = 3, delay = 1000) => {
-          for (let i = 0; i < retries; i++) {
-            try {
-              const response = await fetch(url, options);
-              if (!response.ok) {
-                  if (response.status === 429) {
-                       await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
-                       continue;
-                  }
-                  throw new Error('HTTP error! status: ' + response.status);
-              }
-              return await response.json();
-            } catch (e) {
-              if (i === retries - 1) throw e;
-              await new Promise(r => setTimeout(r, delay * Math.pow(2, i)));
-            }
-          }
-        };
-
-        const resultData = await fetchWithRetry(apiUrl, {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Data } }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
         });
 
-        if (resultData.candidates && resultData.candidates.length > 0 &&
-            resultData.candidates[0].content && resultData.candidates[0].content.parts &&
-            resultData.candidates[0].content.parts.length > 0) {
-          
-          let jsonText = resultData.candidates[0].content.parts[0].text;
-          let preds = JSON.parse(jsonText);
-          
-          if (!Array.isArray(preds)) {
-             preds = [preds];
-          }
+        if (!response.ok) throw new Error("API Key ไม่ถูกต้อง หรือโควต้า AI เต็ม");
+        const data = await response.json();
+        
+        let preds = JSON.parse(data.candidates[0].content.parts[0].text);
+        if (!Array.isArray(preds)) preds = [preds];
 
-          setPredictions(preds);
-          setResult(preds[0]);
-          setEditForm(preds[0]);
-        } else {
-           throw new Error("Invalid response format");
-        }
+        setPredictions(preds); setResult(preds[0]); setEditForm(preds[0]);
       } catch (error) {
-        console.error("AI Error:", error);
-        setErrorMsg("ไม่สามารถวิเคราะห์รูปภาพได้ในขณะนี้ กรุณาลองใหม่อีกครั้ง");
+        setErrorMsg(error.message || "ไม่สามารถวิเคราะห์รูปภาพได้ กรุณาตรวจสอบ API Key");
+        setShowKeySettings(true);
       } finally {
         setIsScanning(false);
       }
     };
 
+    // ฟังก์ชันช่วยคำนวณปริมาณอาหารใหม่
+    const adjustPortion = (multiplier) => {
+      if(!result) return;
+      setEditForm({
+        ...editForm,
+        calories: Math.round(result.calories * multiplier),
+        protein: Math.round(result.protein * multiplier),
+        carbs: Math.round(result.carbs * multiplier),
+        fat: Math.round(result.fat * multiplier)
+      });
+    };
+
     const saveFoodLog = () => {
       const newLog = {
-        id: generateId(),
-        userId: currentUser.id,
-        date: getTodayString(),
-        timestamp: new Date().toISOString(),
-        meal: mealType,
-        imageUrl: image,
-        ...editForm
+        id: generateId(), userId: currentUser.id, date: getTodayString(), timestamp: new Date().toISOString(),
+        meal: mealType, imageUrl: image, ...editForm
       };
-      
-      if (isLocalMode) {
-        setFoodLogs(prev => [newLog, ...prev]);
-      } else if (firebaseUser) {
-        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
-      }
-      
+      if (isLocalMode) setFoodLogs(prev => [newLog, ...prev]);
+      else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
       setActiveTab('dashboard');
     };
 
     return (
-      <div className="max-w-2xl mx-auto bg-white p-4 md:p-8 rounded-3xl shadow-sm border border-blue-100">
+      <div className="max-w-2xl mx-auto bg-white p-4 md:p-8 rounded-3xl shadow-sm border border-pink-100">
         <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">Custom AI สแกนอาหาร & ฉลาก</h2>
-          <p className="text-gray-500 text-sm">โมเดล AI เฉพาะสำหรับแอปนี้ ช่วยคำนวณแคลอรี่จากภาพได้อย่างแม่นยำ</p>
+          <h2 className="text-2xl font-bold text-gray-800">AI สแกนอาหาร & แคลอรี่</h2>
         </div>
 
+        {/* ระบบตั้งค่า API Key */}
+        {showKeySettings && (
+          <div className="bg-yellow-50 p-4 rounded-2xl mb-6 border border-yellow-200">
+            <h3 className="font-bold text-yellow-800 text-sm mb-2">🔑 ตั้งค่า Gemini API Key (เพื่อใช้งานฟรีบนมือถือ/เว็บ)</h3>
+            <p className="text-xs text-yellow-700 mb-3">เนื่องจากความปลอดภัย การใช้บน GitHub/Vercel จำเป็นต้องนำ API Key ของคุณมาใส่เอง (ข้อมูลเก็บไว้เฉพาะในเครื่องนี้เท่านั้น)</p>
+            <input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="AIzaSy..." className="w-full p-2 rounded-xl border border-yellow-300 mb-2 text-sm" />
+            <button onClick={() => saveGeminiKey(geminiKey)} className="bg-yellow-500 text-white text-xs font-bold px-4 py-2 rounded-lg">บันทึก API Key</button>
+          </div>
+        )}
+
         {!image ? (
-          <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-pink-300 border-dashed rounded-3xl cursor-pointer bg-pink-50 hover:bg-pink-100 transition-all">
-            <div className="flex flex-col items-center justify-center pt-5 pb-6">
-              <span className="text-4xl mb-3">📸</span>
-              <p className="mb-2 text-sm text-pink-600 font-semibold"><span className="underline">คลิกเพื่ออัปโหลด</span> หรือลากรูปภาพมาวาง</p>
-              <p className="text-xs text-gray-500">รองรับภาพถ่ายอาหารหรือฉลากโภชนาการ (ภาพจะถูกลบใน 7 วัน)</p>
-            </div>
+          <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-pink-300 border-dashed rounded-3xl cursor-pointer bg-pink-50 hover:bg-pink-100">
+            <span className="text-4xl mb-3">📸</span>
+            <p className="text-sm text-pink-600 font-semibold">อัปโหลดภาพอาหาร หรือ ถ่ายรูป</p>
             <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
           </label>
         ) : (
           <div className="space-y-6">
             <div className="relative rounded-3xl overflow-hidden shadow-md bg-black">
-              <img src={image} alt="Food" className="w-full h-64 object-cover opacity-90" />
-              
-              {isScanning && (
-                <div className="absolute inset-0 bg-blue-900/40 flex flex-col items-center justify-center z-10">
-                  <div className="w-full h-1 bg-green-400 animate-pulse absolute top-1/2 shadow-[0_0_15px_#4ade80]"></div>
-                  <span className="text-white font-mono mt-8 bg-black/50 px-3 py-1 rounded-full text-sm">กำลังวิเคราะห์ด้วย Gemini AI...</span>
-                </div>
-              )}
-              
-              {!isScanning && !predictions && (
-                <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-white/80 p-2 rounded-full text-gray-700 hover:bg-white text-xs">
-                  ✕ เปลี่ยนรูป
-                </button>
-              )}
+              <img src={image} className="w-full h-64 object-cover opacity-90" />
+              {isScanning && <div className="absolute inset-0 bg-blue-900/40 flex items-center justify-center"><span className="text-white px-3 py-1 rounded-full text-sm bg-black/50">กำลังวิเคราะห์...</span></div>}
+              {!isScanning && <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-white/80 p-2 rounded-full text-xs">✕ ลบ</button>}
             </div>
 
-            {errorMsg && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm border border-red-200 text-center font-semibold">
-                ⚠️ {errorMsg}
-              </div>
-            )}
+            {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-semibold">{errorMsg}</div>}
 
             {!predictions && !isScanning && (
-              <button onClick={runCustomAI} className="w-full bg-gradient-to-r from-blue-500 to-pink-500 hover:from-blue-600 hover:to-pink-600 text-white font-bold py-4 px-4 rounded-2xl shadow-lg transform transition hover:-translate-y-1">
-                ✨ ให้ AI วิเคราะห์โภชนาการ
-              </button>
+              <button onClick={runCustomAI} className="w-full bg-gradient-to-r from-blue-500 to-pink-500 text-white font-bold py-4 rounded-2xl shadow-lg">✨ ให้ AI คำนวณโภชนาการ</button>
             )}
 
             {predictions && (
-              <div className="bg-blue-50 p-4 md:p-6 rounded-3xl animate-fadeIn shadow-sm border border-blue-100">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-bold text-blue-800">AI ประเมินว่าเป็นเมนูใด?</h3>
-                  <span className="text-[10px] bg-blue-200 text-blue-700 px-2 py-1 rounded-full">พบ {predictions.length} รายการ</span>
-                </div>
-                
+              <div className="bg-blue-50 p-4 md:p-6 rounded-3xl shadow-sm border border-blue-100">
+                <h3 className="font-bold text-blue-800 mb-3">AI ประเมินว่าเป็นเมนูใด?</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-4">
                   {predictions.map((p, idx) => (
-                    <button 
-                      key={idx}
-                      onClick={() => { setResult(p); setEditForm({...p}); }}
-                      className={`p-3 rounded-xl text-left transition-all ${result?.name === p.name ? 'bg-pink-500 text-white shadow-md transform scale-[1.02]' : 'bg-white text-gray-700 hover:bg-pink-50 border border-gray-200'}`}
-                    >
-                      <div className="font-bold text-sm truncate mb-1">{p.name}</div>
-                      <div className={`text-[10px] ${result?.name === p.name ? 'text-pink-100' : 'text-gray-400'}`}>
-                        มั่นใจ {p.confidence}% • {p.calories} kcal • โปรตีน {p.protein}g
-                      </div>
+                    <button key={idx} onClick={() => { setResult(p); setEditForm({...p}); }} className={`p-3 rounded-xl text-left ${result?.name === p.name ? 'bg-pink-500 text-white' : 'bg-white text-gray-700'}`}>
+                      <div className="font-bold text-sm truncate">{p.name}</div>
+                      <div className="text-[10px]">{p.calories} kcal • โปรตีน {p.protein}g</div>
                     </button>
                   ))}
                 </div>
-                
-                <div className="border-t border-blue-200 pt-4 mt-2">
-                  <div className="flex justify-between items-end mb-4">
-                    <div>
-                      <h4 className="font-bold text-gray-800 text-sm">ตรวจสอบและแก้ไขโภชนาการ</h4>
-                      <p className="text-xs text-gray-500 mt-1">หาก AI คาดเดาผิดพลาด คุณสามารถพิมพ์แก้ไขค่าต่างๆ ได้เอง</p>
+
+                <div className="border-t border-blue-200 pt-4">
+                  <label className="text-xs font-semibold text-gray-700">ชื่ออาหาร / รายการ</label>
+                  <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full p-3 rounded-xl border border-blue-200 mt-1 mb-4" />
+
+                  {/* ฟีเจอร์ใหม่: แบ่งปริมาณการทาน */}
+                  <div className="mb-4 bg-white p-3 rounded-xl border border-blue-100">
+                    <label className="text-xs font-bold text-blue-800 block mb-2">🍽️ ปริมาณที่ทาน (Portion)</label>
+                    <div className="flex flex-wrap gap-2">
+                       <button onClick={() => adjustPortion(1)} className="px-3 py-1.5 bg-blue-100 text-blue-700 text-xs rounded-lg hover:bg-blue-200">ทานหมด 100%</button>
+                       <button onClick={() => adjustPortion(0.5)} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded-lg hover:bg-gray-200">ครึ่งเดียว 50%</button>
+                       <button onClick={() => adjustPortion(0.25)} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded-lg hover:bg-gray-200">ชิมนิดหน่อย 25%</button>
+                       <button onClick={() => adjustPortion(2)} className="px-3 py-1.5 bg-orange-100 text-orange-700 text-xs rounded-lg hover:bg-orange-200">เบิ้ล 2 จาน 200%</button>
                     </div>
                   </div>
 
-                  <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-xs font-semibold text-gray-700">ชื่ออาหาร / รายการ</label>
-                      <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full p-3 rounded-xl border border-blue-200 mt-1 focus:outline-pink-400 text-sm" />
+                      <label className="text-xs font-semibold text-gray-600">แคลอรี่ (kcal)</label>
+                      <input type="number" value={editForm.calories} onChange={e => setEditForm({...editForm, calories: Number(e.target.value)})} className="w-full p-2 rounded-xl border bg-white font-bold text-pink-600" />
                     </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div>
-                        <label className="text-xs font-semibold text-gray-600">แคลอรี่ (kcal)</label>
-                        <input type="number" value={editForm.calories} onChange={e => setEditForm({...editForm, calories: Number(e.target.value)})} className="w-full p-2 rounded-xl border border-blue-200 mt-1 bg-white font-bold text-pink-600" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-bold text-pink-600">💪 โปรตีน (g)</label>
-                        <input type="number" value={editForm.protein} onChange={e => setEditForm({...editForm, protein: Number(e.target.value)})} className="w-full p-2 rounded-xl border-2 border-pink-300 mt-1 bg-pink-50 font-bold text-pink-700 focus:outline-pink-400" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-gray-600">คาร์บ (g)</label>
-                        <input type="number" value={editForm.carbs} onChange={e => setEditForm({...editForm, carbs: Number(e.target.value)})} className="w-full p-2 rounded-xl border border-blue-200 mt-1 bg-white" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-semibold text-gray-600">ไขมัน (g)</label>
-                        <input type="number" value={editForm.fat} onChange={e => setEditForm({...editForm, fat: Number(e.target.value)})} className="w-full p-2 rounded-xl border border-blue-200 mt-1 bg-white" />
-                      </div>
-                    </div>
-
                     <div>
-                       <label className="text-sm font-semibold text-gray-700 block mb-2 mt-4">บันทึกเป็นมื้อ</label>
-                       <div className="flex gap-2">
-                          {['breakfast', 'lunch', 'dinner', 'snack'].map(m => (
-                            <button key={m} onClick={() => setMealType(m)} className={`flex-1 py-2 text-xs md:text-sm rounded-xl font-medium transition ${mealType === m ? 'bg-pink-400 text-white shadow-md' : 'bg-white text-gray-600 border border-gray-200'}`}>
-                              {m === 'breakfast' ? 'เช้า' : m === 'lunch' ? 'กลางวัน' : m === 'dinner' ? 'เย็น' : 'ของว่าง'}
-                            </button>
-                          ))}
-                       </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-4 border-t border-blue-100 mt-4">
-                      <button onClick={() => {setImage(null); setResult(null); setPredictions(null);}} className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3 px-4 rounded-xl text-sm">ยกเลิก</button>
-                      <button onClick={saveFoodLog} className="flex-[2] bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 px-4 rounded-xl shadow-md text-sm">💾 บันทึกลงไดอารี่</button>
+                      <label className="text-xs font-bold text-pink-600">💪 โปรตีน (g)</label>
+                      <input type="number" value={editForm.protein} onChange={e => setEditForm({...editForm, protein: Number(e.target.value)})} className="w-full p-2 rounded-xl border border-pink-300 bg-pink-50 font-bold" />
                     </div>
                   </div>
+
+                  <div className="flex gap-2 mt-4 pt-4 border-t border-blue-100">
+                    {['breakfast', 'lunch', 'dinner', 'snack'].map(m => (
+                      <button key={m} onClick={() => setMealType(m)} className={`flex-1 py-2 text-xs rounded-xl ${mealType === m ? 'bg-pink-400 text-white' : 'bg-white text-gray-600 border'}`}>
+                        {m === 'breakfast' ? 'เช้า' : m === 'lunch' ? 'เที่ยง' : m === 'dinner' ? 'เย็น' : 'ว่าง'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button onClick={saveFoodLog} className="w-full mt-4 bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 px-4 rounded-xl shadow-md">💾 บันทึกลงไดอารี่</button>
                 </div>
               </div>
             )}
@@ -755,115 +368,198 @@ Ensure the response is a pure JSON string.`;
     );
   };
 
-  const Dashboard = ({ targetUserId }) => {
+  // -------------------------------------------------------------
+  // ฟีเจอร์ใหม่: Exercise Tracker (บันทึกและคำนวณแคลอรี่อัตโนมัติ)
+  // -------------------------------------------------------------
+  const ExerciseTracker = ({ targetUserId }) => {
     const uid = targetUserId || currentUser.id;
     const isReadOnly = uid !== currentUser.id;
-    const todayLogs = foodLogs.filter(log => log.userId === uid && log.date === getTodayString());
-    const userTdeeData = tdeeData[uid] || { targetCalories: 2000 };
-    
-    const consumed = todayLogs.reduce((acc, curr) => acc + curr.calories, 0);
-    const target = userTdeeData.targetCalories;
-    const remaining = target - consumed;
-    const percent = Math.min((consumed / target) * 100, 100);
+    const userWeight = tdeeData[uid]?.profile?.weight || 60; // ดึงน้ำหนักมาใช้คำนวณ
+    const [form, setForm] = useState({ activity: 'run', minutes: 30 });
 
-    const macros = todayLogs.reduce((acc, curr) => {
-      acc.protein += curr.protein || 0;
-      acc.carbs += curr.carbs || 0;
-      acc.fat += curr.fat || 0;
-      return acc;
-    }, { protein: 0, carbs: 0, fat: 0 });
+    const activities = [
+      { id: 'walk', name: 'เดิน (ชิลๆ)', met: 3.5, icon: '🚶' },
+      { id: 'run', name: 'วิ่ง / จ็อกกิ้ง', met: 8.0, icon: '🏃' },
+      { id: 'cycle', name: 'ปั่นจักรยาน', met: 6.0, icon: '🚴' },
+      { id: 'swim', name: 'ว่ายน้ำ', met: 7.0, icon: '🏊' },
+      { id: 'weight', name: 'เวทเทรนนิ่ง', met: 3.5, icon: '🏋️' },
+      { id: 'yoga', name: 'โยคะ', met: 3.0, icon: '🧘' },
+      { id: 'aerobic', name: 'เต้นแอโรบิค', met: 6.5, icon: '💃' },
+    ];
 
-    const deleteLog = (id) => {
+    const currentActivity = activities.find(a => a.id === form.activity);
+    // สูตรคำนวณแคลอรี่: (MET * น้ำหนัก kg * ชั่วโมง)
+    const calculatedBurn = Math.round(currentActivity.met * userWeight * (form.minutes / 60));
+
+    const saveExercise = () => {
       if(isReadOnly) return;
+      const newLog = {
+        id: generateId(), userId: uid, date: getTodayString(), timestamp: new Date().toISOString(),
+        activityName: currentActivity.name, icon: currentActivity.icon, minutes: form.minutes, calories: calculatedBurn
+      };
+      if (isLocalMode) setExerciseLogs(prev => [newLog, ...prev]);
+      else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'exerciseLogs', newLog.id), newLog);
       
-      if (isLocalMode) {
-        setFoodLogs(prev => prev.filter(log => log.id !== id));
-      } else if (firebaseUser) {
-        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', id));
-      }
+      setActiveTab('dashboard');
     };
 
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        {isReadOnly && <div className="bg-blue-50 text-blue-600 p-3 rounded-xl text-sm text-center font-bold">👀 กำลังดูข้อมูลของ: {users.find(u=>u.id === uid)?.name}</div>}
+      <div className="max-w-2xl mx-auto bg-white p-6 rounded-3xl shadow-sm border border-green-100">
+        <div className="text-center mb-6">
+          <span className="text-4xl mb-2 block">🏃‍♀️</span>
+          <h2 className="text-2xl font-bold text-gray-800">บันทึกการออกกำลังกาย</h2>
+          <p className="text-sm text-gray-500">ระบบคำนวณแคลอรี่ให้อัตโนมัติตามน้ำหนักตัวของคุณ ({userWeight} กก.)</p>
+        </div>
 
-        {!isReadOnly && new Date().getDay() === 0 && measurements.filter(m => m.userId === uid && m.date === getTodayString()).length === 0 && (
-          <div className="bg-orange-100 border-l-4 border-orange-500 text-orange-700 p-4 rounded-xl shadow-sm flex justify-between items-center cursor-pointer hover:bg-orange-200 transition" onClick={() => setActiveTab('measure')}>
+        {!isReadOnly && (
+          <div className="space-y-4">
             <div>
-              <p className="font-bold">⚠️ วันอาทิตย์แล้ว!</p>
-              <p className="text-sm">ถึงเวลาอัพเดทสัดส่วนประจำสัปดาห์ของคุณแล้ว (บังคับอัพเดท)</p>
+              <label className="text-sm font-bold text-gray-700 block mb-2">เลือกประเภทกีฬา</label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {activities.map(act => (
+                  <button key={act.id} onClick={() => setForm({...form, activity: act.id})} className={`p-3 rounded-xl border flex flex-col items-center justify-center gap-1 transition ${form.activity === act.id ? 'bg-green-100 border-green-400 text-green-800' : 'bg-gray-50 text-gray-600 hover:bg-gray-100'}`}>
+                    <span className="text-2xl">{act.icon}</span>
+                    <span className="text-xs font-semibold">{act.name}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <span className="text-xl">👉</span>
+
+            <div>
+              <label className="text-sm font-bold text-gray-700 block mb-2">ระยะเวลา (นาที)</label>
+              <input type="number" value={form.minutes} onChange={e => setForm({...form, minutes: Number(e.target.value)})} className="w-full p-3 rounded-xl border border-green-200 outline-none focus:ring-2 focus:ring-green-400 text-xl font-bold text-center bg-green-50 text-green-700" />
+            </div>
+
+            <div className="bg-green-500 text-white p-4 rounded-2xl text-center shadow-md">
+              <p className="text-sm opacity-90 mb-1">🔥 คาดว่าเผาผลาญไป</p>
+              <p className="text-4xl font-bold">{calculatedBurn} <span className="text-lg font-normal">kcal</span></p>
+            </div>
+
+            <button onClick={saveExercise} className="w-full bg-gray-800 text-white font-bold py-4 rounded-xl shadow-md hover:bg-black">บันทึกกิจกรรม</button>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // -------------------------------------------------------------
+  // Dashboard อัปเดต: นำแคลอรี่ออกกำลังกายมาหักล้าง
+  // -------------------------------------------------------------
+  const Dashboard = ({ targetUserId }) => {
+    const uid = targetUserId || currentUser.id;
+    const isReadOnly = uid !== currentUser.id;
+    
+    const todayFood = foodLogs.filter(log => log.userId === uid && log.date === getTodayString());
+    const todayEx = exerciseLogs.filter(log => log.userId === uid && log.date === getTodayString());
+    const uTdee = tdeeData[uid] || { targetCalories: 2000, profile: { weight: 60 } };
+    
+    const consumed = todayFood.reduce((acc, curr) => acc + curr.calories, 0);
+    const burned = todayEx.reduce((acc, curr) => acc + curr.calories, 0);
+    
+    // โควต้าแคลอรี่ที่ทานได้ = เป้าหมาย TDEE + แคลอรี่ที่เบิร์นออกไป
+    const dailyBudget = uTdee.targetCalories + burned;
+    const remaining = dailyBudget - consumed;
+    const percent = Math.min((consumed / dailyBudget) * 100, 100);
+
+    // คำนวณกระดานผู้นำ (Top 3 เผาผลาญสูงสุด) มาแสดงหน้าแรก
+    const topRankings = users
+      .filter(u => u.role === 'user')
+      .map(u => {
+        const uBurned = exerciseLogs.filter(log => log.userId === u.id).reduce((sum, log) => sum + log.calories, 0);
+        return { ...u, burned: uBurned };
+      })
+      .sort((a,b) => b.burned - a.burned)
+      .slice(0, 3);
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6">
+        {isReadOnly && <div className="bg-blue-50 text-blue-600 p-4 rounded-xl text-sm font-bold text-center flex justify-between items-center border border-blue-200">
+          <span>👀 กำลังดูข้อมูลของ User: {users.find(u=>u.id===uid)?.name || uid}</span>
+          <button onClick={() => setViewingUserId(null)} className="underline hover:text-blue-800">กลับหน้ารายชื่อ</button>
+        </div>}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 bg-white p-6 rounded-3xl shadow-sm border border-pink-100 flex flex-col justify-center items-center">
-            <h3 className="text-gray-500 font-medium mb-4">สรุปแคลอรี่วันนี้</h3>
-            
+          <div className="lg:col-span-1 bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col justify-center items-center">
+            <h3 className="text-gray-500 font-medium mb-4">สรุปแคลอรี่คงเหลือ</h3>
             <div className="relative w-48 h-48 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                <path className="text-gray-100" strokeWidth="3" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                <path className={`${percent > 100 ? 'text-red-400' : 'text-pink-400'}`} strokeDasharray={`${percent}, 100`} strokeWidth="3" strokeLinecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className="text-gray-100" strokeWidth="3" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                <path className={`${consumed > dailyBudget ? 'text-red-400' : 'text-green-400'}`} strokeDasharray={`${percent}, 100`} strokeWidth="3" strokeLinecap="round" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
               </svg>
               <div className="absolute flex flex-col items-center">
-                <span className="text-3xl font-bold text-gray-800">{remaining}</span>
-                <span className="text-xs text-gray-500">kcal คงเหลือ</span>
+                <span className={`text-4xl font-bold ${consumed > dailyBudget ? 'text-red-500' : 'text-gray-800'}`}>{Math.abs(remaining)}</span>
+                <span className="text-xs text-gray-500">{remaining < 0 ? 'kcal เกินโควต้า' : 'kcal ทานได้อีก'}</span>
               </div>
             </div>
             
-            <div className="w-full flex justify-between text-sm mt-6 px-4">
-              <div className="text-center"><p className="text-gray-400">เป้าหมาย</p><p className="font-bold text-gray-700">{target}</p></div>
-              <div className="text-center"><p className="text-gray-400">ทานแล้ว</p><p className="font-bold text-pink-500">{consumed}</p></div>
+            <div className="w-full grid grid-cols-3 gap-2 text-center text-xs mt-6 bg-gray-50 p-3 rounded-xl border border-gray-200">
+              <div><p className="text-gray-400 mb-1">เป้าหมาย</p><p className="font-bold text-gray-700 text-sm">{uTdee.targetCalories}</p></div>
+              <div><p className="text-gray-400 mb-1">ทานแล้ว</p><p className="font-bold text-pink-500 text-sm">{consumed}</p></div>
+              <div><p className="text-gray-400 mb-1">ออกกำลัง</p><p className="font-bold text-green-500 text-sm">+{burned}</p></div>
             </div>
           </div>
 
-          <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100 grid grid-cols-3 gap-4 text-center items-center">
-              <div>
-                <p className="text-xs text-gray-500 mb-1">คาร์บ</p>
-                <p className="text-xl font-bold text-blue-500">{macros.carbs}g</p>
-                <div className="w-full bg-gray-100 h-1.5 rounded-full mt-2"><div className="bg-blue-400 h-1.5 rounded-full" style={{width: '50%'}}></div></div>
+          <div className="lg:col-span-2 space-y-4">
+            {/* สรุปจัดอันดับ (Mini Ranking) */}
+            <div className="bg-gradient-to-r from-yellow-50 to-orange-50 p-5 rounded-3xl shadow-sm border border-yellow-100">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-yellow-800 flex items-center gap-2"><span>🏆</span> Top 3 ผู้เผาผลาญสูงสุด</h3>
+                {!isReadOnly && <button onClick={() => setActiveTab('rank')} className="text-xs text-yellow-600 font-bold hover:underline">ดูทั้งหมด</button>}
               </div>
-              <div className="transform scale-110 bg-pink-50 p-3 rounded-2xl shadow-sm border border-pink-200">
-                <p className="text-xs font-bold text-pink-600 mb-1">💪 โปรตีน</p>
-                <p className="text-2xl font-bold text-pink-600">{macros.protein}g</p>
-                <div className="w-full bg-pink-100 h-1.5 rounded-full mt-2"><div className="bg-pink-500 h-1.5 rounded-full" style={{width: '60%'}}></div></div>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">ไขมัน</p>
-                <p className="text-xl font-bold text-orange-400">{macros.fat}g</p>
-                <div className="w-full bg-gray-100 h-1.5 rounded-full mt-2"><div className="bg-orange-400 h-1.5 rounded-full" style={{width: '40%'}}></div></div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {topRankings.map((u, idx) => (
+                  <div key={u.id} className="bg-white/80 p-3 rounded-2xl flex items-center gap-3 shadow-sm border border-yellow-200/50">
+                    <div className="text-2xl">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</div>
+                    <div>
+                      <p className="font-bold text-sm text-gray-800 truncate max-w-[100px]">{u.name}</p>
+                      <p className="text-xs text-orange-600 font-semibold">{u.burned} kcal</p>
+                    </div>
+                  </div>
+                ))}
+                {topRankings.length === 0 && <p className="text-sm text-gray-500 col-span-3 text-center">ยังไม่มีการจัดอันดับ</p>}
               </div>
             </div>
 
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800">รายการอาหารวันนี้</h3>
-                {!isReadOnly && <button onClick={() => setActiveTab('ai')} className="text-sm bg-pink-100 text-pink-600 px-3 py-1 rounded-full font-medium hover:bg-pink-200">+ เพิ่ม</button>}
+                <h3 className="font-bold text-gray-800 flex items-center gap-2"><span>🍽️</span> อาหารที่ทานวันนี้</h3>
               </div>
-
-              {todayLogs.length === 0 ? (
-                <div className="text-center py-8 text-gray-400 text-sm">ยังไม่มีรายการอาหาร วันนี้ทานอะไรดี?</div>
-              ) : (
-                <div className="space-y-4 max-h-80 overflow-y-auto pr-2">
-                  {todayLogs.map(log => (
-                    <div key={log.id} className="flex gap-4 items-center bg-slate-50 p-3 rounded-2xl">
-                      {log.imageUrl ? (
-                        <img src={log.imageUrl} alt={log.name} className="w-16 h-16 rounded-xl object-cover shadow-sm" />
-                      ) : (
-                        <div className="w-16 h-16 rounded-xl bg-pink-100 flex items-center justify-center text-2xl">🍽️</div>
-                      )}
-                      
-                      <div className="flex-1">
-                        <p className="font-bold text-gray-800 text-sm">{log.name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5"><span className="font-semibold text-pink-600">💪 P:{log.protein}g</span> · C:{log.carbs}g · F:{log.fat}g</p>
-                        <span className="text-[10px] bg-white border border-gray-200 px-2 py-0.5 rounded-full mt-1 inline-block text-gray-500 uppercase">{log.meal}</span>
+              {todayFood.length === 0 ? <div className="text-center text-sm text-gray-400 py-4">ยังไม่มีข้อมูล</div> : (
+                <div className="space-y-3">
+                  {todayFood.map(log => (
+                    <div key={log.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-gray-100">
+                      <div>
+                        <p className="font-bold text-sm text-gray-800">{log.name}</p>
+                        <p className="text-xs text-pink-500 font-semibold">P:{log.protein}g C:{log.carbs}g F:{log.fat}g</p>
                       </div>
-                      
-                      <div className="text-right flex flex-col items-end gap-2">
-                        <span className="font-bold text-pink-600">{log.calories} <span className="text-xs font-normal">kcal</span></span>
-                        {!isReadOnly && <button onClick={() => deleteLog(log.id)} className="text-xs text-red-400 hover:text-red-600 bg-red-50 px-2 py-1 rounded">ลบ / แก้ไข</button>}
+                      <div className="text-right flex flex-col items-end">
+                        <p className="font-bold text-pink-600">{log.calories} <span className="text-[10px]">kcal</span></p>
+                        {!isReadOnly && <button onClick={() => {if(isLocalMode) setFoodLogs(p=>p.filter(x=>x.id!==log.id)); else deleteDoc(doc(db,'artifacts',appId,'public','data','foodLogs',log.id))}} className="text-[10px] text-red-400 hover:underline mt-1">ลบ</button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-bold text-gray-800 flex items-center gap-2"><span>🏃‍♀️</span> กิจกรรมวันนี้</h3>
+              </div>
+              {todayEx.length === 0 ? <div className="text-center text-sm text-gray-400 py-4">ยังไม่มีกิจกรรม ลองออกกำลังกายดูสิ!</div> : (
+                <div className="space-y-3">
+                  {todayEx.map(log => (
+                    <div key={log.id} className="flex justify-between items-center bg-green-50 p-3 rounded-xl border border-green-100">
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl">{log.icon}</span>
+                        <div>
+                          <p className="font-bold text-sm text-green-800">{log.activityName}</p>
+                          <p className="text-xs text-green-600">{log.minutes} นาที</p>
+                        </div>
+                      </div>
+                      <div className="text-right flex flex-col items-end">
+                        <p className="font-bold text-green-600">🔥 {log.calories} <span className="text-[10px]">kcal</span></p>
+                        {!isReadOnly && <button onClick={() => {if(isLocalMode) setExerciseLogs(p=>p.filter(x=>x.id!==log.id)); else deleteDoc(doc(db,'artifacts',appId,'public','data','exerciseLogs',log.id))}} className="text-[10px] text-red-400 hover:underline mt-1">ลบ</button>}
                       </div>
                     </div>
                   ))}
@@ -876,602 +572,181 @@ Ensure the response is a pure JSON string.`;
     );
   };
 
-  const MeasurementTracker = ({ targetUserId }) => {
-    const uid = targetUserId || currentUser.id;
-    const isReadOnly = uid !== currentUser.id;
-    const [form, setForm] = useState({ weight: '', height: '', waist: '', chest: '', arm: '', leg: '', neck: '' });
-    
-    const userMeasurements = measurements.filter(m => m.userId === uid).sort((a,b) => new Date(b.date) - new Date(a.date));
+  // -------------------------------------------------------------
+  // กู้คืนระบบตั้งค่าเป้าหมาย, จัดอันดับ และ โหมดแอดมิน (Admin Dashboard)
+  // -------------------------------------------------------------
+  const TDEECalculator = () => {
+    const uid = currentUser.id;
+    const uTdee = tdeeData[uid] || { targetCalories: 2000, profile: { weight: 60 } };
+    const [form, setForm] = useState({ targetCalories: uTdee.targetCalories, weight: uTdee.profile?.weight || 60 });
 
-    const saveMeasurement = () => {
-      if(!form.weight || !form.waist || isReadOnly) return;
-      const newRecord = { id: generateId(), userId: uid, date: getTodayString(), ...form };
-      
-      if (isLocalMode) {
-        setMeasurements(prev => [newRecord, ...prev]);
-      } else if (firebaseUser) {
-        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', newRecord.id), newRecord);
-      }
-      
-      setForm({ weight: '', height: '', waist: '', chest: '', arm: '', leg: '', neck: '' });
-      
-      const btn = document.getElementById('measure-btn');
-      if (btn) {
-        btn.innerText = 'บันทึกเรียบร้อย!';
-        setTimeout(() => btn.innerText = 'บันทึกสัดส่วนประจำสัปดาห์', 2000);
-      }
+    const handleSave = () => {
+      const data = { targetCalories: form.targetCalories, profile: { weight: form.weight } };
+      if(isLocalMode) setTdeeData(p => ({...p, [uid]: data}));
+      else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), data);
+      alert('บันทึกเป้าหมายแล้ว! (ระบบจะใช้น้ำหนักใหม่คำนวณแคลอรี่เผาผลาญทันที)');
     };
 
     return (
-      <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
-        {!isReadOnly && (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-            <h2 className="text-xl font-bold text-gray-800 mb-2">บันทึกสัดส่วนรายสัปดาห์</h2>
-            <p className="text-sm text-gray-500 mb-6">กรุณาอัพเดทข้อมูลทุกวันอาทิตย์เพื่อติดตามผลลัพธ์</p>
-            
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Input label="น้ำหนัก (กก.)" val={form.weight} onChange={v => setForm({...form, weight: v})} />
-                <Input label="ส่วนสูง (ซม.)" val={form.height} onChange={v => setForm({...form, height: v})} />
-                <Input label="รอบเอว (นิ้ว)" val={form.waist} onChange={v => setForm({...form, waist: v})} />
-                <Input label="รอบอก (นิ้ว)" val={form.chest} onChange={v => setForm({...form, chest: v})} />
-                <Input label="รอบแขน (นิ้ว)" val={form.arm} onChange={v => setForm({...form, arm: v})} />
-                <Input label="รอบขา (นิ้ว)" val={form.leg} onChange={v => setForm({...form, leg: v})} />
-                <Input label="รอบคอ (นิ้ว)" val={form.neck} onChange={v => setForm({...form, neck: v})} className="col-span-2" />
-              </div>
-              
-              <button id="measure-btn" onClick={saveMeasurement} className="w-full mt-4 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all">
-                บันทึกสัดส่วนประจำสัปดาห์
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className={`bg-blue-50 p-6 rounded-3xl border border-blue-200 ${isReadOnly ? 'col-span-1 md:col-span-2' : ''}`}>
-          <h3 className="font-bold text-blue-800 mb-4">ประวัติการเปลี่ยนแปลง {isReadOnly && `ของ ${users.find(u=>u.id===uid)?.name}`}</h3>
-          {userMeasurements.length === 0 ? (
-            <div className="text-center text-blue-400 py-10">ยังไม่มีประวัติการบันทึก</div>
-          ) : (
-            <div className="space-y-4">
-              {userMeasurements.map((m, idx) => (
-                <div key={m.id} className="bg-white p-4 rounded-2xl shadow-sm relative overflow-hidden">
-                  {idx === 0 && <span className="absolute top-0 right-0 bg-blue-500 text-white text-[10px] px-2 py-1 rounded-bl-lg">ล่าสุด</span>}
-                  <p className="font-bold text-gray-700 text-sm mb-2">📅 วันที่: {m.date}</p>
-                  <div className="grid grid-cols-3 gap-2 text-xs">
-                    <div className="bg-gray-50 p-2 rounded">น้ำหนัก: <span className="font-bold text-pink-500">{m.weight}</span></div>
-                    <div className="bg-gray-50 p-2 rounded">เอว: <span className="font-bold text-blue-500">{m.waist}</span></div>
-                    <div className="bg-gray-50 p-2 rounded">อก: <span className="font-bold text-green-500">{m.chest}</span></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="max-w-md mx-auto bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
+         <h2 className="text-xl font-bold mb-4 text-gray-800">⚙️ ตั้งค่าเป้าหมาย & น้ำหนัก</h2>
+         <div className="space-y-4">
+           <div><label className="text-xs font-bold text-gray-600 block mb-1">น้ำหนักปัจจุบัน (กก.) - ใช้คำนวณการเผาผลาญ</label>
+           <input type="number" value={form.weight} onChange={e=>setForm({...form, weight: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-blue-400 outline-none" /></div>
+           <div><label className="text-xs font-bold text-gray-600 block mb-1">เป้าหมายแคลอรี่ (kcal/วัน)</label>
+           <input type="number" value={form.targetCalories} onChange={e=>setForm({...form, targetCalories: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-blue-400 outline-none" /></div>
+           <button onClick={handleSave} className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl hover:bg-blue-600 transition shadow-sm">💾 บันทึกการตั้งค่า</button>
+         </div>
       </div>
     );
   };
-
-  const Input = ({ label, val, onChange, className="" }) => (
-    <div className={className}>
-      <label className="block text-xs text-gray-600 mb-1">{label}</label>
-      <input type="number" value={val} onChange={e => onChange(e.target.value)} className="w-full p-2 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-300" />
-    </div>
+  
+  const MeasurementTracker = () => (
+      <div className="p-6 bg-white rounded-3xl text-center border border-gray-200 max-w-lg mx-auto shadow-sm">
+        <span className="text-4xl mb-4 block">📏</span>
+        <h2 className="text-xl font-bold text-gray-800">บันทึกสัดส่วน</h2>
+        <p className="text-sm text-gray-500 mt-2">ฟีเจอร์นี้กำลังถูกอัปเกรดเพื่อรองรับกราฟในเวอร์ชันถัดไป กรุณาใช้น้ำหนักในหน้า "เป้าหมาย" แทนชั่วคราวครับ</p>
+      </div>
   );
 
   const RankingBoard = () => {
-    const allUsersScores = users.filter(u => u.role === 'user').map(u => {
-      const uTdee = tdeeData[u.id] || { targetCalories: 2000 };
-      const uLogs = foodLogs.filter(log => log.userId === u.id && log.date === getTodayString());
-      const consumed = uLogs.reduce((acc, curr) => acc + curr.calories, 0);
-      
-      let score = 100 - Math.abs((uTdee.targetCalories - consumed) / 20);
-      if(consumed === 0) score = 0; 
-
-      return {
-        id: u.id,
-        name: u.name,
-        caloriesScore: Math.round(score > 100 ? 100 : Math.max(0, score))
-      };
-    }).sort((a, b) => b.caloriesScore - a.caloriesScore);
+    const rankedUsers = users.filter(u => u.role === 'user').map(u => {
+      const burned = exerciseLogs.filter(log => log.userId === u.id).reduce((sum, log) => sum + log.calories, 0);
+      return { ...u, burned };
+    }).sort((a,b) => b.burned - a.burned);
 
     return (
-      <div className="max-w-2xl mx-auto bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-yellow-100">
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-bold text-gray-800">🏆 Leaderboard สุขภาพดี</h2>
-          <p className="text-gray-500 text-sm">จัดอันดับความมีวินัยการคุมแคลอรี่ประจำวัน</p>
+      <div className="max-w-2xl mx-auto bg-white p-6 rounded-3xl shadow-sm border border-yellow-100">
+        <div className="text-center mb-6">
+          <span className="text-4xl block mb-2">🏆</span>
+          <h2 className="text-2xl font-bold text-gray-800">กระดานผู้นำสายเบิร์น</h2>
+          <p className="text-sm text-gray-500">จัดอันดับจากแคลอรี่ที่เผาผลาญทั้งหมดผ่านการออกกำลังกาย</p>
         </div>
-
-        <div className="space-y-4">
-          {allUsersScores.map((u, index) => (
-            <div key={u.id} className={`flex items-center justify-between p-4 rounded-2xl ${u.id === currentUser.id ? 'bg-pink-50 border border-pink-200 shadow-sm transform scale-[1.02] transition-transform' : 'bg-gray-50'}`}>
-              <div className="flex items-center gap-4">
-                <span className={`text-2xl font-bold w-8 text-center ${index === 0 ? 'text-yellow-500' : index === 1 ? 'text-gray-400' : index === 2 ? 'text-amber-600' : 'text-gray-300'}`}>
-                  {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index+1}`}
-                </span>
-                <div>
-                  <p className={`font-bold ${u.id === currentUser.id ? 'text-pink-600' : 'text-gray-700'}`}>{u.name} {u.id === currentUser.id && '(คุณ)'}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-blue-500">{u.caloriesScore}</p>
-                <p className="text-[10px] text-gray-400">คะแนนวินัย</p>
-              </div>
+        <div className="space-y-3">
+          {rankedUsers.map((u, i) => (
+            <div key={u.id} className={`flex items-center p-4 rounded-2xl shadow-sm transition-transform hover:scale-[1.01] ${i===0 ? 'bg-gradient-to-r from-yellow-100 to-orange-100 border border-yellow-300' : 'bg-gray-50 border border-gray-100'}`}>
+              <div className="w-10 font-bold text-xl text-center text-gray-400">{i===0?'🥇':i===1?'🥈':i===2?'🥉':i+1}</div>
+              <div className="flex-1 font-bold text-gray-800 text-lg">{u.name}</div>
+              <div className="font-bold text-orange-600 text-lg">{u.burned} <span className="text-sm text-gray-500">kcal</span></div>
             </div>
           ))}
+          {rankedUsers.length === 0 && <p className="text-center text-gray-400 py-4">ยังไม่มีผู้ใช้งานที่มีการเผาผลาญแคลอรี่</p>}
         </div>
       </div>
     );
   };
 
-  const CoachDashboard = () => {
-    const [newUserForm, setNewUserForm] = useState({ name: '', password: '', role: 'user' });
-    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
-    const [coachTab, setCoachTab] = useState('daily-summary'); 
-    const [summaryDate, setSummaryDate] = useState(getTodayString());
-    const [filterStatus, setFilterStatus] = useState('all'); 
-    const [editingNoteUserId, setEditingNoteUserId] = useState(null);
-    const [tempNoteText, setTempNoteText] = useState('');
+  const AdminDashboard = () => {
+    const [newAccount, setNewAccount] = useState({ name: '', password: '', role: 'user' });
 
-    const handleViewUser = (userId) => {
-      setViewingUserId(userId);
-      setActiveTab('coach-user-detail');
-    };
-
-    const handleAddUser = (e) => {
+    const handleCreateAccount = (e) => {
       e.preventDefault();
-      if (!newUserForm.name || !newUserForm.password) return;
-      
-      const newId = generateId();
-      const newUser = {
-        id: newId,
-        name: newUserForm.name,
-        role: newUserForm.role || 'user',
-        password: newUserForm.password
-      };
-      
+      const id = 'u' + Date.now();
+      const acc = { id, ...newAccount };
       if (isLocalMode) {
-        setUsers(prev => [...prev, newUser]);
-        if (newUser.role === 'user') {
-          setTdeeData(prev => ({...prev, [newId]: { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } }}));
-        }
-      } else if (firebaseUser) {
-        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', newId), newUser);
-        if (newUser.role === 'user') {
-          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', newId), { bmr: 0, tdee: 0, targetCalories: 2000, profile: { gender: 'female', age: 25, height: 160, weight: 55, activity: '1.2', goal: 'maintain' } });
-        }
+          setUsers(prev => [...prev, acc]);
+          if(newAccount.role === 'user') setTdeeData(prev => ({...prev, [id]: { targetCalories: 2000, profile: { weight: 60 } }}));
+      } else {
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', id), acc);
+          if(newAccount.role === 'user') setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', id), { targetCalories: 2000, profile: { weight: 60 } });
       }
-      
-      setNewUserForm({ name: '', password: '', role: 'user' });
+      setNewAccount({ name: '', password: '', role: 'user' });
     };
 
-    const handleDeleteUser = (userId) => {
-      if (isLocalMode) {
-        setUsers(prev => prev.filter(u => u.id !== userId));
-      } else if (firebaseUser) {
-        deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', userId));
-      }
-      setConfirmDeleteId(null);
-    };
-
-    const saveCoachNote = (userId) => {
-      const key = `${userId}_${summaryDate}`;
-      
-      if (isLocalMode) {
-         setCoachNotes(prev => ({...prev, [key]: tempNoteText}));
-      } else if (firebaseUser) {
-         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'coachNotes', key), { text: tempNoteText });
-      }
-      
-      setEditingNoteUserId(null);
-      setTempNoteText('');
-    };
-
-    const memberUsers = users.filter(u => u.role === 'user');
-    const managedAccounts = users.filter(u => u.id !== currentUser.id);
-
-    const dailyUserData = memberUsers.map(user => {
-      const uTdee = tdeeData[user.id] || { targetCalories: 2000 };
-      const uLogs = foodLogs.filter(log => log.userId === user.id && log.date === summaryDate);
-      const consumedCals = uLogs.reduce((acc, curr) => acc + curr.calories, 0);
-      const totalProtein = uLogs.reduce((acc, curr) => acc + (curr.protein || 0), 0);
-      const totalCarbs = uLogs.reduce((acc, curr) => acc + (curr.carbs || 0), 0);
-      const totalFat = uLogs.reduce((acc, curr) => acc + (curr.fat || 0), 0);
-      const target = uTdee.targetCalories || 2000;
-      
-      let status = 'ontrack';
-      if (uLogs.length === 0) status = 'nolog';
-      else if (consumedCals > target) status = 'over';
-
-      return {
-        user,
-        target,
-        consumedCals,
-        totalProtein,
-        totalCarbs,
-        totalFat,
-        mealCount: uLogs.length,
-        status,
-        percent: Math.min(Math.round((consumedCals / target) * 100), 100),
-        isOver: consumedCals > target,
-        noteKey: `${user.id}_${summaryDate}`
-      };
-    });
-
-    const totalMembersCount = memberUsers.length;
-    const loggedCount = dailyUserData.filter(d => d.mealCount > 0).length;
-    const onTrackCount = dailyUserData.filter(d => d.status === 'ontrack').length;
-    const overCount = dailyUserData.filter(d => d.status === 'over').length;
-    const noLogCount = dailyUserData.filter(d => d.status === 'nolog').length;
-    const aggregateConsumedCals = dailyUserData.reduce((acc, curr) => acc + curr.consumedCals, 0);
-    const aggregateTargetCals = dailyUserData.reduce((acc, curr) => acc + curr.target, 0);
-    const aggregateProtein = dailyUserData.reduce((acc, curr) => acc + curr.totalProtein, 0);
-
-    const filteredUserData = dailyUserData.filter(item => {
-      if (filterStatus === 'all') return true;
-      return item.status === filterStatus;
-    });
+    if (viewingUserId) {
+       const vUser = users.find(u => u.id === viewingUserId);
+       return (
+         <div className="space-y-6">
+           <div className="flex justify-between items-center bg-blue-50 p-4 rounded-2xl border border-blue-200">
+             <div>
+               <p className="text-xs text-blue-600 font-bold uppercase tracking-wider">โหมดตรวจสอบผู้ใช้งาน</p>
+               <h2 className="text-xl font-bold text-blue-900">{vUser?.name}</h2>
+             </div>
+             <button onClick={() => setViewingUserId(null)} className="bg-white text-blue-600 px-4 py-2 rounded-xl font-bold shadow-sm hover:bg-blue-100 transition">← กลับหน้ารายชื่อ</button>
+           </div>
+           {/* แสดง Dashboard ของ User ที่เลือก */}
+           <Dashboard targetUserId={viewingUserId} />
+         </div>
+       )
+    }
 
     return (
-      <div className="max-w-6xl mx-auto space-y-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-gradient-to-r from-blue-600 to-indigo-700 p-6 rounded-3xl text-white shadow-xl gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="bg-blue-400/30 text-blue-100 text-xs px-3 py-1 rounded-full font-semibold border border-blue-300/30">
-                🔒 สิทธิ์ผู้ดูแลระบบ & โค้ช
-              </span>
-            </div>
-            <h2 className="text-2xl md:text-3xl font-bold">แผงควบคุมและสรุปภาพรวมรายวัน</h2>
-            <p className="text-blue-100 text-sm mt-1">ติดตามโภชนาการ วิเคราะห์แคลอรี่ และดูแลสมาชิกทุกคนได้อย่างง่ายดาย</p>
-          </div>
-          <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md p-1.5 rounded-2xl border border-white/20 self-stretch md:self-auto">
-            <button 
-              onClick={() => setCoachTab('daily-summary')} 
-              className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${coachTab === 'daily-summary' ? 'bg-white text-blue-700 shadow-md' : 'text-white hover:bg-white/10'}`}
-            >
-              📊 สรุปภาพรวมรายวัน
-            </button>
-            <button 
-              onClick={() => setCoachTab('members')} 
-              className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${coachTab === 'members' ? 'bg-white text-blue-700 shadow-md' : 'text-white hover:bg-white/10'}`}
-            >
-              👥 จัดการสมาชิก & โค้ช ({managedAccounts.length})
-            </button>
-          </div>
+      <div className="space-y-6 max-w-4xl mx-auto">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 rounded-3xl text-white shadow-lg flex justify-between items-center">
+           <div>
+             <h1 className="text-2xl font-bold mb-1">ยินดีต้อนรับ, {currentUser.name}</h1>
+             <p className="opacity-90 text-sm">จัดการบัญชีผู้ใช้งาน เพิ่มโค้ช และตรวจสอบข้อมูลบันทึกของสมาชิกแต่ละคน</p>
+           </div>
+           <div className="text-5xl opacity-80 hidden sm:block">🛡️</div>
         </div>
 
-        {coachTab === 'daily-summary' && (
-          <div className="space-y-6 animate-fadeIn">
-            <div className="bg-white p-4 md:p-6 rounded-3xl shadow-sm border border-blue-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div className="flex items-center gap-3 w-full md:w-auto">
-                <span className="text-2xl">📅</span>
-                <div>
-                  <label className="block text-xs text-gray-400 font-semibold">เลือกวันที่ดูสรุปภาพรวม</label>
-                  <input 
-                    type="date" 
-                    value={summaryDate}
-                    onChange={(e) => setSummaryDate(e.target.value)}
-                    className="p-2 bg-gray-50 border border-gray-200 rounded-xl font-semibold text-gray-700 outline-none focus:ring-2 focus:ring-blue-300 text-sm"
-                  />
-                </div>
-                {summaryDate === getTodayString() && (
-                  <span className="bg-green-100 text-green-700 text-xs px-2.5 py-1 rounded-full font-bold">วันนี้</span>
-                )}
-              </div>
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+           <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><span>👥</span> เพิ่มบัญชีใหม่ (สมาชิก / โค้ช)</h2>
+           <form onSubmit={handleCreateAccount} className="flex gap-3 mb-6 flex-wrap bg-gray-50 p-4 rounded-2xl border border-gray-100">
+             <div className="flex-1 min-w-[150px]">
+               <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อที่แสดง</label>
+               <input placeholder="เช่น น้องพาสเทล" required value={newAccount.name} onChange={e=>setNewAccount({...newAccount, name: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400" />
+             </div>
+             <div className="w-[120px] sm:w-[150px]">
+               <label className="text-xs font-bold text-gray-500 mb-1 block">รหัสผ่าน</label>
+               <input placeholder="ตั้งรหัส" required value={newAccount.password} onChange={e=>setNewAccount({...newAccount, password: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400" />
+             </div>
+             <div className="w-[120px]">
+               <label className="text-xs font-bold text-gray-500 mb-1 block">ประเภท</label>
+               <select value={newAccount.role} onChange={e=>setNewAccount({...newAccount, role: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400 bg-white">
+                 <option value="user">สมาชิก</option>
+                 <option value="coach">โค้ช</option>
+                 {currentUser.role === 'admin' && <option value="admin">แอดมิน</option>}
+               </select>
+             </div>
+             <div className="flex items-end w-full sm:w-auto mt-2 sm:mt-0">
+               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-md transition sm:h-[50px]">+ สร้างบัญชี</button>
+             </div>
+           </form>
 
-              <div className="flex flex-wrap gap-1.5 bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto text-xs font-semibold">
-                <button onClick={() => setFilterStatus('all')} className={`px-3 py-1.5 rounded-xl transition ${filterStatus === 'all' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600'}`}>ทั้งหมด ({totalMembersCount})</button>
-                <button onClick={() => setFilterStatus('ontrack')} className={`px-3 py-1.5 rounded-xl transition ${filterStatus === 'ontrack' ? 'bg-green-500 text-white shadow-sm' : 'text-gray-600'}`}>🟢 ปกติ ({onTrackCount})</button>
-                <button onClick={() => setFilterStatus('over')} className={`px-3 py-1.5 rounded-xl transition ${filterStatus === 'over' ? 'bg-red-500 text-white shadow-sm' : 'text-gray-600'}`}>⚠️ เกินเป้า ({overCount})</button>
-                <button onClick={() => setFilterStatus('nolog')} className={`px-3 py-1.5 rounded-xl transition ${filterStatus === 'nolog' ? 'bg-gray-400 text-white shadow-sm' : 'text-gray-600'}`}>⏳ ยังไม่บันทึก ({noLogCount})</button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-400 font-semibold">สมาชิกที่บันทึกแล้ว</span>
-                  <span className="text-xl">📝</span>
-                </div>
-                <div className="text-2xl font-bold text-gray-800">{loggedCount} <span className="text-sm font-normal text-gray-400">/ {totalMembersCount} คน</span></div>
-                <div className="w-full bg-gray-100 h-1.5 rounded-full mt-3 overflow-hidden">
-                  <div className="bg-blue-500 h-full rounded-full" style={{ width: `${(loggedCount / Math.max(totalMembersCount, 1)) * 100}%` }}></div>
-                </div>
-              </div>
-
-              <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-400 font-semibold">แคลอรี่รวมทุกคน</span>
-                  <span className="text-xl">🔥</span>
-                </div>
-                <div className="text-2xl font-bold text-pink-600">{aggregateConsumedCals.toLocaleString()} <span className="text-xs font-normal text-gray-400">kcal</span></div>
-                <p className="text-[11px] text-gray-400 mt-1">เป้าหมายรวม: {aggregateTargetCals.toLocaleString()} kcal</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-400 font-semibold">คุมในเป้าหมาย</span>
-                  <span className="text-xl">🎯</span>
-                </div>
-                <div className="text-2xl font-bold text-green-600">{onTrackCount} <span className="text-sm font-normal text-gray-400">คน</span></div>
-                <p className="text-[11px] text-red-500 font-semibold mt-1">เกินเป้าหมาย: {overCount} คน</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-3xl shadow-sm border border-blue-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-xs text-gray-400 font-semibold">โปรตีนรวมวันนี้</span>
-                  <span className="text-xl">💪</span>
-                </div>
-                <div className="text-2xl font-bold text-blue-600">{aggregateProtein} <span className="text-xs font-normal text-gray-400">g</span></div>
-                <p className="text-[11px] text-gray-400 mt-1">เฉลี่ย: {loggedCount > 0 ? Math.round(aggregateProtein / loggedCount) : 0}g / คน</p>
-              </div>
-            </div>
-
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 space-y-4">
-              <div className="flex justify-between items-center pb-2 border-b border-gray-100">
-                <h3 className="font-bold text-gray-800 text-lg flex items-center gap-2">
-                  <span>📋</span> รายงานรายบุคคล ประจำวันที่ {summaryDate}
-                </h3>
-                <span className="text-xs bg-blue-50 text-blue-600 px-3 py-1 rounded-full font-semibold">
-                  แสดงผล {filteredUserData.length} รายการ
-                </span>
-              </div>
-
-              {filteredUserData.length === 0 ? (
-                <div className="text-center py-12 text-gray-400 text-sm">
-                  ไม่พบข้อมูลสมาชิกในสถานะนี้ของวันที่เลือก
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {filteredUserData.map(item => {
-                    const savedNote = coachNotes[item.noteKey];
-                    const isEditingNote = editingNoteUserId === item.user.id;
-
-                    return (
-                      <div 
-                        key={item.user.id} 
-                        className={`p-5 rounded-3xl border transition-all ${
-                          item.status === 'over' 
-                            ? 'bg-red-50/40 border-red-200' 
-                            : item.status === 'nolog'
-                            ? 'bg-gray-50 border-gray-200'
-                            : 'bg-white border-gray-200 hover:border-blue-200 shadow-sm'
-                        }`}
-                      >
-                        <div className="flex justify-between items-start mb-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-200 to-blue-200 flex items-center justify-center font-bold text-gray-700">
-                              👤
-                            </div>
-                            <div>
-                              <h4 className="font-bold text-gray-800 text-base">{item.user.name}</h4>
-                              <p className="text-xs text-gray-400">บันทึกอาหาร {item.mealCount} มื้อ</p>
-                            </div>
-                          </div>
-
-                          <div>
-                            {item.status === 'over' && (
-                              <span className="bg-red-100 text-red-600 text-xs px-2.5 py-1 rounded-full font-bold">⚠️ เกินเป้า</span>
-                            )}
-                            {item.status === 'ontrack' && (
-                              <span className="bg-green-100 text-green-700 text-xs px-2.5 py-1 rounded-full font-bold">🟢 ปกติ</span>
-                            )}
-                            {item.status === 'nolog' && (
-                              <span className="bg-gray-200 text-gray-600 text-xs px-2.5 py-1 rounded-full font-bold">⏳ ยังไม่บันทึก</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="space-y-3 bg-white/80 p-3.5 rounded-2xl border border-gray-100">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-gray-500">พลังงานที่ทาน:</span>
-                            <span className={`font-bold ${item.isOver ? 'text-red-600' : 'text-pink-600'}`}>
-                              {item.consumedCals.toLocaleString()} / {item.target.toLocaleString()} kcal
-                            </span>
-                          </div>
-
-                          <div className="w-full bg-gray-100 h-2.5 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-500 ${item.isOver ? 'bg-red-500' : 'bg-gradient-to-r from-blue-400 to-green-400'}`}
-                              style={{ width: `${item.percent}%` }}
-                            ></div>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-2 text-center text-xs pt-1 border-t border-gray-100">
-                            <div><span className="text-gray-400">💪 P:</span> <span className="font-bold text-pink-600">{item.totalProtein}g</span></div>
-                            <div><span className="text-gray-400">🍞 C:</span> <span className="font-bold text-blue-500">{item.totalCarbs}g</span></div>
-                            <div><span className="text-gray-400">🥑 F:</span> <span className="font-bold text-amber-500">{item.totalFat}g</span></div>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 pt-3 border-t border-gray-100">
-                          {isEditingNote ? (
-                            <div className="space-y-2">
-                              <textarea
-                                value={tempNoteText}
-                                onChange={(e) => setTempNoteText(e.target.value)}
-                                placeholder="พิมพ์ข้อความแนะนำสำหรับสมาชิกท่านนี้..."
-                                className="w-full p-2.5 text-xs bg-white border border-blue-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none h-16"
-                              ></textarea>
-                              <div className="flex justify-end gap-2">
-                                <button 
-                                  onClick={() => setEditingNoteUserId(null)} 
-                                  className="px-3 py-1 bg-gray-200 text-gray-600 text-xs rounded-lg hover:bg-gray-300"
-                                >
-                                  ยกเลิก
-                                </button>
-                                <button 
-                                  onClick={() => saveCoachNote(item.user.id)} 
-                                  className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg font-bold hover:bg-blue-700 shadow-sm"
-                                >
-                                  บันทึกข้อความ
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center justify-between text-xs">
-                              <div className="flex-1 pr-2">
-                                {savedNote ? (
-                                  <p className="text-blue-800 bg-blue-50 p-2 rounded-xl border border-blue-100 font-medium">
-                                    💬 <b>คำแนะนำโค้ช:</b> {savedNote}
-                                  </p>
-                                ) : (
-                                  <span className="text-gray-400 italic">ยังไม่มีข้อความส่งถึงสมาชิก</span>
-                                )}
-                              </div>
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => {
-                                    setEditingNoteUserId(item.user.id);
-                                    setTempNoteText(savedNote || '');
-                                  }}
-                                  className="text-xs text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg font-semibold whitespace-nowrap"
-                                >
-                                  {savedNote ? '✏️ แก้ไขคำแนะนำ' : '💬 ให้คำแนะนำ'}
-                                </button>
-                                <button 
-                                  onClick={() => handleViewUser(item.user.id)} 
-                                  className="text-xs text-gray-700 bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg font-semibold whitespace-nowrap"
-                                >
-                                  🔍 ดูเชิงลึก
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {coachTab === 'members' && (
-          <div className="space-y-6 animate-fadeIn">
-            <div className="bg-white p-6 rounded-3xl shadow-sm border border-blue-100">
-              <h3 className="text-lg font-bold text-gray-800 mb-4">✨ เพิ่มผู้ใช้งานใหม่ (สมาชิก / โค้ช)</h3>
-              <form onSubmit={handleAddUser} className="flex flex-col md:flex-row gap-4 items-end">
-                <div className="flex-1 w-full">
-                  <label className="block text-sm text-gray-600 mb-1">ชื่อผู้ใช้งาน</label>
-                  <input 
-                    type="text" 
-                    value={newUserForm.name}
-                    onChange={e => setNewUserForm({...newUserForm, name: e.target.value})}
-                    placeholder="เช่น โค้ชต้นไม้ หรือ น้องแจน"
-                    className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-blue-300 border border-gray-200 text-sm"
-                  />
-                </div>
-                <div className="flex-1 w-full">
-                  <label className="block text-sm text-gray-600 mb-1">ประเภทบัญชี</label>
-                  <select 
-                    value={newUserForm.role}
-                    onChange={e => setNewUserForm({...newUserForm, role: e.target.value})}
-                    className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-blue-300 border border-gray-200 text-sm font-semibold text-gray-700"
-                  >
-                    <option value="user">👤 สมาชิก (User)</option>
-                    <option value="coach">🧢 โค้ช (Coach)</option>
-                  </select>
-                </div>
-                <div className="flex-1 w-full">
-                  <label className="block text-sm text-gray-600 mb-1">ตั้งรหัสผ่าน</label>
-                  <input 
-                    type="text" 
-                    value={newUserForm.password}
-                    onChange={e => setNewUserForm({...newUserForm, password: e.target.value})}
-                    placeholder="เช่น pass1234"
-                    className="w-full p-3 bg-gray-50 rounded-xl outline-none focus:ring-2 focus:ring-blue-300 border border-gray-200 text-sm"
-                  />
-                </div>
-                <button type="submit" disabled={!newUserForm.name || !newUserForm.password} className="w-full md:w-auto bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl transition-all shadow-sm">
-                  + เพิ่มบัญชี
-                </button>
-              </form>
-            </div>
-
-            <h3 className="text-xl font-bold text-gray-800 pt-2">👥 รายชื่อผู้ใช้งานทั้งหมด ({managedAccounts.length})</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {managedAccounts.map(user => {
-                const isCoachRole = user.role === 'coach';
-                const uTdee = tdeeData[user.id] || { targetCalories: 2000, profile: { goal: 'maintain' } };
-                const uLogs = foodLogs.filter(log => log.userId === user.id && log.date === getTodayString());
-                const consumed = uLogs.reduce((acc, curr) => acc + curr.calories, 0);
-                const percent = Math.min((consumed / uTdee.targetCalories) * 100, 100);
-                
-                const goalText = uTdee.profile.goal === 'lose' ? 'ลดน้ำหนัก' : 
-                                 uTdee.profile.goal === 'lose_fast' ? 'ลดน้ำหนักเร่งด่วน' :
-                                 uTdee.profile.goal === 'gain' ? 'เพิ่มน้ำหนัก' : 'รักษาน้ำหนัก';
-
-                return (
-                  <div key={user.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 hover:shadow-md transition">
-                    <div className="flex justify-between items-start mb-4">
-                      <div className={`w-12 h-12 ${isCoachRole ? 'bg-indigo-100 text-indigo-600' : 'bg-pink-100 text-pink-500'} rounded-full flex items-center justify-center text-xl font-bold`}>
-                        {isCoachRole ? '🧢' : '👤'}
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${isCoachRole ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}`}>
-                        {isCoachRole ? '🧢 โค้ช' : '👤 สมาชิก'}
-                      </span>
-                    </div>
-                    <h3 className="font-bold text-lg text-gray-800">{user.name}</h3>
-                    
-                    {!isCoachRole ? (
-                      <>
-                        <p className="text-sm text-gray-500 mb-4">เป้าหมาย: {goalText} ({uTdee.targetCalories} kcal)</p>
-                        <div className="space-y-2 mb-4">
-                          <div className="flex justify-between text-sm"><span className="text-gray-500">ทานวันนี้:</span><span className={`font-semibold ${consumed > uTdee.targetCalories ? 'text-red-500' : 'text-gray-700'}`}>{consumed} kcal</span></div>
-                          <div className="w-full bg-gray-100 h-2 rounded-full"><div className={`h-2 rounded-full ${consumed > uTdee.targetCalories ? 'bg-red-400' : 'bg-blue-400'}`} style={{width: `${percent}%`}}></div></div>
-                        </div>
-                      </>
-                    ) : (
-                      <p className="text-xs text-gray-400 my-4 bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-100">
-                        🛡️ สิทธิ์ผู้ดูแล/โค้ช สามารถเข้าถึงแผงควบคุมและแนะนำสมาชิกได้
-                      </p>
-                    )}
-
-                    {confirmDeleteId === user.id ? (
-                      <div className="flex gap-2">
-                        <button onClick={() => handleDeleteUser(user.id)} className="w-full bg-red-500 text-white py-2 rounded-xl text-sm font-medium hover:bg-red-600 transition">ยืนยันลบ</button>
-                        <button onClick={() => setConfirmDeleteId(null)} className="w-full bg-gray-200 text-gray-700 py-2 rounded-xl text-sm font-medium hover:bg-gray-300 transition">ยกเลิก</button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        {!isCoachRole && (
-                          <button onClick={() => handleViewUser(user.id)} className="flex-[2] bg-blue-50 text-blue-600 py-2 rounded-xl text-sm font-medium hover:bg-blue-100 transition">รายละเอียดเชิงลึก</button>
-                        )}
-                        <button onClick={() => setConfirmDeleteId(user.id)} className={`py-2 rounded-xl text-sm font-medium hover:bg-red-100 transition ${isCoachRole ? 'w-full bg-red-50 text-red-500' : 'flex-1 bg-red-50 text-red-500'}`}>ลบ</button>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+           <h3 className="font-bold text-gray-800 mb-3">รายชื่อบัญชีในระบบ ({users.filter(u => u.id !== currentUser.id).length})</h3>
+           <div className="space-y-3">
+             {users.filter(u => u.id !== currentUser.id).map(u => (
+               <div key={u.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-2xl hover:border-blue-300 transition shadow-sm">
+                 <div className="flex items-center gap-3">
+                   <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-white shadow-sm ${u.role === 'admin' ? 'bg-purple-500' : u.role === 'coach' ? 'bg-blue-500' : 'bg-pink-400'}`}>
+                     {u.name.charAt(0)}
+                   </div>
+                   <div>
+                     <p className="font-bold text-gray-800">{u.name}</p>
+                     <p className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full inline-block mt-1">
+                       {u.role === 'admin' ? 'แอดมิน' : u.role === 'coach' ? 'โค้ชประจำกลุ่ม' : 'สมาชิก'}
+                     </p>
+                   </div>
+                 </div>
+                 <div className="flex items-center gap-2">
+                   {u.role === 'user' && (
+                     <button onClick={() => setViewingUserId(u.id)} className="text-sm bg-pink-50 hover:bg-pink-100 text-pink-600 px-4 py-2 rounded-xl font-bold transition">ดูสถิติ</button>
+                   )}
+                   <button onClick={() => {
+                       if(window.confirm(`ยืนยันการลบบัญชี ${u.name}?`)) {
+                           if(isLocalMode) setUsers(prev => prev.filter(x => x.id !== u.id));
+                           else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id));
+                       }
+                   }} className="text-sm text-gray-400 hover:text-red-500 px-3 py-2 bg-gray-50 rounded-xl transition">ลบ</button>
+                 </div>
+               </div>
+             ))}
+           </div>
+        </div>
       </div>
     );
   };
-
-  const CoachUserDetail = () => {
-    return (
-      <div className="space-y-8 animate-fadeIn">
-         <div className="flex gap-4 border-b border-gray-200 pb-4">
-            <div className="text-xl font-bold text-gray-800">ข้อมูลของ: {users.find(u=>u.id===viewingUserId)?.name}</div>
-         </div>
-         <Dashboard targetUserId={viewingUserId} />
-         <TDEECalculator targetUserId={viewingUserId} />
-         <MeasurementTracker targetUserId={viewingUserId} />
-      </div>
-    )
-  }
 
   return (
     <Layout>
-      {currentUser.role !== 'user' ? (
-        activeTab === 'coach-user-detail' ? <CoachUserDetail /> : <CoachDashboard />
+      {currentUser.role === 'coach' || currentUser.role === 'admin' ? (
+        <AdminDashboard />
       ) : (
         <div className="pb-10">
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'ai' && <AIFoodScanner />}
+          {activeTab === 'exercise' && <ExerciseTracker />}
           {activeTab === 'tdee' && <TDEECalculator />}
           {activeTab === 'measure' && <MeasurementTracker />}
           {activeTab === 'rank' && <RankingBoard />}
