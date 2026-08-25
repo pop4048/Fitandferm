@@ -207,6 +207,7 @@ export default function PastelFitApp() {
 
   const AIFoodScanner = () => {
     const [image, setImage] = useState(null);
+    const [textInput, setTextInput] = useState(''); // เพิ่ม state สำหรับเก็บข้อความ
     const [isScanning, setIsScanning] = useState(false);
     const [predictions, setPredictions] = useState(null);
     const [result, setResult] = useState(null); 
@@ -234,18 +235,29 @@ export default function PastelFitApp() {
       }
     };
 
-    const runCustomAI = async () => {
+    const runCustomAI = async (mode = 'image') => {
       if (!geminiKey) { setShowKeySettings(true); return; }
-      if (!image) return;
+      if (mode === 'image' && !image) return;
+      if (mode === 'text' && !textInput.trim()) return;
+      
       setIsScanning(true); setErrorMsg('');
+      if (mode === 'text') setImage(null); // ล้างรูปภาพถ้าเลือกค้นหาด้วยข้อความ
       
       try {
-        const base64Data = image.split(',')[1];
-        const mimeType = image.split(';')[0].split(':')[1] || "image/jpeg";
-        const prompt = `Analyze this image of food. Respond ONLY with a valid JSON array of up to 3 objects in this exact format: [{"name": "ชื่ออาหารภาษาไทย", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]`;
+        let parts = [];
+        if (mode === 'image') {
+          const base64Data = image.split(',')[1];
+          const mimeType = image.split(';')[0].split(':')[1] || "image/jpeg";
+          const prompt = `Analyze this image of food. Respond ONLY with a valid JSON array of up to 3 objects in this exact format: [{"name": "ชื่ออาหารภาษาไทย", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]`;
+          parts = [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }];
+        } else {
+          // คำสั่ง Prompt สำหรับโหมดข้อความ
+          const prompt = `Analyze the nutritional value of this food item: "${textInput}". Respond ONLY with a valid JSON array of up to 3 objects (different variations or portion sizes if applicable) in this exact format: [{"name": "ชื่ออาหารภาษาไทย", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]`;
+          parts = [{ text: prompt }];
+        }
 
         const requestBody = {
-          contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }] }],
+          contents: [{ role: "user", parts: parts }],
           generationConfig: { responseMimeType: "application/json" }
         };
 
@@ -325,6 +337,7 @@ export default function PastelFitApp() {
       
       // ล้างค่ารูปภาพหลังจากบันทึกเสร็จ เพื่อเคลียร์หน่วยความจำ
       setImage(null);
+      setTextInput(''); // ล้างข้อความ
       setPredictions(null);
       
       setActiveTab('dashboard');
@@ -354,30 +367,78 @@ export default function PastelFitApp() {
            </div>
         )}
 
-        {!image ? (
-          <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-pink-300 border-dashed rounded-3xl cursor-pointer bg-pink-50 hover:bg-pink-100 transition-colors">
-            <span className="text-4xl mb-3">🍽️</span>
-            <p className="text-sm text-pink-600 font-bold">อัปโหลดภาพอาหาร หรือ ถ่ายรูป</p>
-            <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
-          </label>
-        ) : (
-          <div className="space-y-6 animate-fade-in">
+        {}
+        {!image && !predictions && !isScanning && (
+          <div className="space-y-4">
+            <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-pink-300 border-dashed rounded-3xl cursor-pointer bg-pink-50 hover:bg-pink-100 transition-colors">
+              <span className="text-4xl mb-3">📸</span>
+              <p className="text-sm text-pink-600 font-bold">อัปโหลดภาพอาหาร หรือ ถ่ายรูป</p>
+              <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
+            </label>
+            
+            <div className="flex items-center gap-4 py-2">
+                <div className="h-px bg-gray-200 flex-1"></div>
+                <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">หรือ พิมพ์ชื่ออาหาร</span>
+                <div className="h-px bg-gray-200 flex-1"></div>
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-2">
+                <input 
+                    type="text" 
+                    value={textInput} 
+                    onChange={e => setTextInput(e.target.value)} 
+                    placeholder="เช่น ข้าวกะเพราหมูกรอบ, ชาเขียวปั่น" 
+                    className="flex-1 p-4 bg-gray-50 rounded-2xl border border-gray-200 outline-none focus:border-pink-400 focus:bg-white transition"
+                    onKeyDown={e => e.key === 'Enter' && runCustomAI('text')}
+                />
+                <button onClick={() => runCustomAI('text')} className="bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition whitespace-nowrap">
+                    ค้นหา 🔍
+                </button>
+            </div>
+          </div>
+        )}
+
+        {}
+        {image && !predictions && (
+          <div className="space-y-4 animate-fade-in">
             <div className="relative rounded-3xl overflow-hidden shadow-md bg-black">
               <img src={image} className="w-full h-64 object-cover opacity-90" alt="Food" />
               {isScanning && <div className="absolute inset-0 bg-blue-900/60 flex items-center justify-center"><span className="text-white px-4 py-2 rounded-full text-sm font-bold bg-black/50 animate-pulse">✨ AI กำลังวิเคราะห์...</span></div>}
-              {!isScanning && <button onClick={() => {setImage(null); setPredictions(null);}} className="absolute top-2 right-2 bg-white/90 px-3 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm hover:bg-red-50 hover:text-red-500">✕ ลบภาพ</button>}
+              {!isScanning && <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-white/90 px-3 py-1 rounded-full text-xs font-bold text-gray-700 shadow-sm hover:bg-red-50 hover:text-red-500">✕ ยกเลิกภาพ</button>}
+            </div>
+            {!isScanning && (
+              <button onClick={() => runCustomAI('image')} className="w-full bg-gradient-to-r from-blue-500 to-pink-500 hover:from-blue-600 hover:to-pink-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform transform hover:scale-[1.02]">✨ ให้ AI วิเคราะห์โภชนาการ</button>
+            )}
+          </div>
+        )}
+
+        {}
+        {!image && !predictions && isScanning && (
+          <div className="bg-pink-50 p-10 rounded-3xl border border-pink-100 flex flex-col items-center justify-center animate-pulse mt-4">
+            <span className="text-4xl mb-4 block">🤖</span>
+            <p className="text-pink-600 font-bold">AI กำลังค้นหาข้อมูลโภชนาการ...</p>
+          </div>
+        )}
+
+        {}
+        {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-bold border border-red-200 mt-4">{errorMsg}</div>}
+
+        {predictions && (
+          <div className="space-y-4 animate-fade-in mt-4">
+            <div className="flex justify-between items-center mb-2 px-2">
+               <h3 className="font-bold text-gray-800">ผลการวิเคราะห์</h3>
+               <button onClick={() => {setImage(null); setPredictions(null); setTextInput('');}} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 font-bold shadow-sm">← สแกนใหม่</button>
             </div>
 
-            {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-bold border border-red-200">{errorMsg}</div>}
-
-            {!predictions && !isScanning && (
-              <button onClick={runCustomAI} className="w-full bg-gradient-to-r from-blue-500 to-pink-500 hover:from-blue-600 hover:to-pink-600 text-white font-bold py-4 rounded-2xl shadow-lg transition-transform transform hover:scale-[1.02]">✨ ให้ AI วิเคราะห์โภชนาการ</button>
+            {image && (
+              <div className="relative rounded-3xl overflow-hidden shadow-sm bg-black h-32 md:h-48 mb-4">
+                <img src={image} className="w-full h-full object-cover opacity-80" alt="Food" />
+              </div>
             )}
 
-            {predictions && (
-              <div className="bg-blue-50 p-5 rounded-3xl shadow-sm border border-blue-100">
-                <h3 className="font-bold text-blue-900 mb-3 text-sm">💡 AI ประเมินว่าอาจจะเป็น:</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-5">
+            <div className="bg-blue-50 p-5 rounded-3xl shadow-sm border border-blue-100">
+              <h3 className="font-bold text-blue-900 mb-3 text-sm">💡 AI ประเมินว่าอาจจะเป็น:</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-5">
                   {predictions.map((p, idx) => (
                     <button key={idx} onClick={() => { setResult(p); setEditForm({...p}); setBaseNutrition({...p}); setActivePortion(1); }} className={`p-3 rounded-2xl text-left border-2 transition-all ${result?.name === p.name ? 'border-pink-400 bg-pink-500 text-white shadow-md' : 'border-transparent bg-white text-gray-700 hover:border-pink-200'}`}>
                       <div className="font-bold text-sm truncate">{p.name}</div>
@@ -431,8 +492,7 @@ export default function PastelFitApp() {
                   <button onClick={saveFoodLog} className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-xl shadow-md transition-transform transform hover:scale-[1.02]">💾 บันทึกลงไดอารี่</button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
         )}
       </div>
     );
