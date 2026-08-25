@@ -218,7 +218,7 @@ export default function PastelFitApp() {
     const [errorMsg, setErrorMsg] = useState('');
     
     const [geminiKey, setGeminiKey] = useState(localStorage.getItem('pastel_gemini_key') || '');
-    const [showKeySettings, setShowKeySettings] = useState(!geminiKey);
+    const [showKeySettings, setShowKeySettings] = useState(false);
 
     const saveGeminiKey = (key) => {
       setGeminiKey(key);
@@ -732,10 +732,14 @@ export default function PastelFitApp() {
     const topRankings = users
       .filter(u => u.role === 'user')
       .map(u => {
-        const uBurned = exerciseLogs.filter(log => log.userId === u.id).reduce((sum, log) => sum + log.calories, 0);
-        return { ...u, burned: uBurned };
+        const uFoods = foodLogs.filter(log => log.userId === u.id);
+        const protein = uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0);
+        const calories = uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0);
+        const carbs = uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0);
+        const fat = uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0);
+        return { ...u, protein, calories, carbs, fat };
       })
-      .sort((a,b) => b.burned - a.burned)
+      .sort((a,b) => b.protein - a.protein)
       .slice(0, 3);
 
     return (
@@ -779,18 +783,20 @@ export default function PastelFitApp() {
           </div>
 
           <div className="lg:col-span-2 space-y-4">
+            {}
             <div className="bg-gradient-to-r from-yellow-50 to-orange-50 p-5 rounded-3xl shadow-sm border border-yellow-100">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-yellow-800 flex items-center gap-2"><span>🏆</span> Top 3 สายเบิร์น</h3>
+                <h3 className="font-bold text-yellow-800 flex items-center gap-2"><span>🏆</span> Top 3 สายโปรตีน</h3>
                 {!isReadOnly && <button onClick={() => setActiveTab('rank')} className="text-xs bg-white px-3 py-1 rounded-lg text-yellow-600 font-bold hover:shadow-sm">ดูทั้งหมด</button>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {topRankings.map((u, idx) => (
                   <div key={u.id} className="bg-white/90 p-3 rounded-2xl flex items-center gap-3 shadow-sm border border-yellow-200/50">
                     <div className="text-2xl drop-shadow-sm">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</div>
-                    <div>
-                      <p className="font-bold text-sm text-gray-800 truncate max-w-[100px]">{u.name}</p>
-                      <p className="text-xs text-orange-600 font-bold">{u.burned} kcal</p>
+                    <div className="overflow-hidden flex-1">
+                      <p className="font-bold text-sm text-gray-800 truncate">{u.name}</p>
+                      <p className="text-xs text-blue-600 font-extrabold">🥩 {u.protein}g โปรตีน</p>
+                      <p className="text-[10px] text-gray-400 font-bold truncate">🔥 {u.calories} kcal | C:{u.carbs}g F:{u.fat}g</p>
                     </div>
                   </div>
                 ))}
@@ -1059,26 +1065,53 @@ export default function PastelFitApp() {
 
   const RankingBoard = () => {
     const rankedUsers = users.filter(u => u.role === 'user').map(u => {
-      const burned = exerciseLogs.filter(log => log.userId === u.id).reduce((sum, log) => sum + log.calories, 0);
-      return { ...u, burned };
-    }).sort((a,b) => b.burned - a.burned);
+      const uFoods = foodLogs.filter(log => log.userId === u.id);
+      const protein = uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0);
+      const calories = uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0);
+      const carbs = uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0);
+      const fat = uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0);
+      return { ...u, protein, calories, carbs, fat };
+    }).sort((a,b) => b.protein - a.protein);
 
     return (
       <div className="max-w-2xl mx-auto bg-white p-6 rounded-3xl shadow-sm border border-yellow-100">
         <div className="text-center mb-8">
           <span className="text-5xl block mb-3 drop-shadow-md">🏆</span>
-          <h2 className="text-2xl font-bold text-gray-800">กระดานผู้นำสายเบิร์น</h2>
-          <p className="text-sm text-gray-500 mt-1">จัดอันดับจากการเผาผลาญทั้งหมด (All-time)</p>
+          <h2 className="text-2xl font-bold text-gray-800">กระดานผู้นำสายโปรตีน</h2>
+          <p className="text-sm text-gray-500 mt-1">จัดอันดับจากการทานโปรตีนสะสมทั้งหมด (พร้อมสรุปสารอาหารครบถ้วน)</p>
         </div>
         <div className="space-y-4">
           {rankedUsers.map((u, i) => (
-            <div key={u.id} className={`flex items-center p-4 rounded-2xl shadow-sm transition-transform hover:scale-[1.02] ${i===0 ? 'bg-gradient-to-r from-yellow-100 to-amber-100 border-2 border-yellow-300' : i===1 ? 'bg-gray-50 border-2 border-gray-300' : i===2 ? 'bg-orange-50 border-2 border-orange-200' : 'bg-white border border-gray-100'}`}>
-              <div className="w-12 font-bold text-2xl text-center">{i===0?'🥇':i===1?'🥈':i===2?'🥉':<span className="text-gray-400 text-lg">{i+1}</span>}</div>
-              <div className="flex-1 font-bold text-gray-800 text-lg ml-2">{u.name}</div>
-              <div className="font-extrabold text-orange-600 text-xl">{u.burned} <span className="text-xs font-bold text-orange-400">kcal</span></div>
+            <div key={u.id} className={`flex flex-col sm:flex-row items-start sm:items-center p-4 rounded-2xl shadow-sm transition-transform hover:scale-[1.01] gap-3 ${i===0 ? 'bg-gradient-to-r from-amber-50 to-yellow-100 border-2 border-yellow-300' : i===1 ? 'bg-slate-50 border-2 border-gray-200' : i===2 ? 'bg-orange-50 border-2 border-orange-200' : 'bg-white border border-gray-100'}`}>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <div className="w-10 font-bold text-2xl text-center flex-shrink-0">{i===0?'🥇':i===1?'🥈':i===2?'🥉':<span className="text-gray-400 text-lg">{i+1}</span>}</div>
+                <div className="font-bold text-gray-800 text-lg flex-1 sm:w-36 truncate">{u.name}</div>
+              </div>
+              
+              <div className="flex-1 w-full flex flex-wrap sm:flex-nowrap justify-between items-center bg-white/80 p-3 rounded-xl border border-gray-100/80 gap-2">
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">โปรตีนทั้งหมด</span>
+                  <span className="font-extrabold text-blue-600 text-xl flex items-center gap-1">🥩 {u.protein} <span className="text-xs font-bold text-blue-400">กรัม</span></span>
+                </div>
+                
+                <div className="flex gap-3 text-right">
+                  <div>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">แคลอรี่</p>
+                    <p className="font-bold text-pink-500 text-xs">{u.calories} <span className="text-[9px]">kcal</span></p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">คาร์บ</p>
+                    <p className="font-bold text-yellow-600 text-xs">{u.carbs} <span className="text-[9px]">g</span></p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold text-gray-400 uppercase">ไขมัน</p>
+                    <p className="font-bold text-red-500 text-xs">{u.fat} <span className="text-[9px]">g</span></p>
+                  </div>
+                </div>
+              </div>
             </div>
           ))}
-          {rankedUsers.length === 0 && <p className="text-center font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed">ยังไม่มีผู้ใช้งานที่มีการเผาผลาญ</p>}
+          {rankedUsers.length === 0 && <p className="text-center font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed">ยังไม่มีข้อมูลการบันทึกอาหาร</p>}
         </div>
       </div>
     );
