@@ -138,6 +138,25 @@ export default function PastelFitApp() {
     return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); unsubChat(); };
   }, [firebaseUser, isOfflineMode]);
 
+  useEffect(() => {
+    // ลบข้อความที่เก่ากว่า 5 นาที ออกจากระบบอัตโนมัติ
+    const cleanupInterval = setInterval(() => {
+      const cutoffTime = new Date().getTime() - (5 * 60 * 1000); // 5 นาทีที่แล้ว
+      
+      if (isOfflineMode) {
+        setChatMessages(prev => prev.filter(msg => new Date(msg.timestamp).getTime() >= cutoffTime));
+      } else if (db) {
+        chatMessages.forEach(msg => {
+          if (new Date(msg.timestamp).getTime() < cutoffTime) {
+            deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chatMessages', msg.id)).catch(() => {});
+          }
+        });
+      }
+    }, 60000); // ตรวจสอบเคลียร์ข้อมูลทุกๆ 1 นาที
+
+    return () => clearInterval(cleanupInterval);
+  }, [chatMessages, isOfflineMode]);
+
   const handleLogin = (e) => {
     e.preventDefault();
     const user = users.find(u => u.id === e.target.userId.value);
@@ -193,11 +212,12 @@ export default function PastelFitApp() {
                <h3 className="text-xl font-bold text-gray-800">กระดานพูดคุย (Public)</h3>
              </div>
              
+             {}
              <div className="bg-slate-50 flex-1 rounded-2xl p-4 mb-4 h-64 overflow-y-auto border border-gray-100 flex flex-col gap-3">
                {chatMessages.length === 0 ? (
                  <p className="text-center text-gray-400 text-sm mt-10 font-medium">ยังไม่มีข้อความ... เริ่มพูดคุยเลย!</p>
                ) : (
-                 chatMessages.map(msg => (
+                 chatMessages.slice(-5).map(msg => (
                    <div key={msg.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-left animate-fade-in">
                      <div className="flex justify-between items-baseline mb-1">
                        <span className="font-bold text-sm text-blue-600">{msg.senderName}</span>
