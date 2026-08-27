@@ -4,7 +4,21 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from 'firebase/firestore';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
-const getTodayString = () => new Date().toISOString().split('T')[0];
+
+// ฟังก์ชันใหม่สำหรับการคำนวณวันที่ โดยให้วันใหม่เริ่มตอน 04:00 น.
+const getEffectiveDateString = () => {
+  const now = new Date();
+  // ลบออก 4 ชั่วโมง (4 * 60 * 60 * 1000 มิลลิวินาที)
+  // ถ้าตอนนี้ 03:00 น. จะถูกตีความเป็น 23:00 น. ของเมื่อวาน
+  const effectiveDate = new Date(now.getTime() - (4 * 60 * 60 * 1000));
+  
+  const year = effectiveDate.getFullYear();
+  const month = String(effectiveDate.getMonth() + 1).padStart(2, '0');
+  const day = String(effectiveDate.getDate()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}`;
+};
+
 const formatDate = (dateString) => {
   const options = { day: 'numeric', month: 'short', year: 'numeric' };
   return new Date(dateString).toLocaleDateString('th-TH', options);
@@ -17,10 +31,8 @@ const INITIAL_USERS = [
   { id: 'admin1', name: 'Admin (ผู้ดูแลระบบ)', role: 'admin', password: 'admin' }
 ];
 
-// --- Firebase Initialization ---
 const appId = 'pastelfit-my-app'; 
 
-// 🚨 นำ firebaseConfig ของคุณมาใส่ตรงนี้ 🚨
 const firebaseConfig = {
   apiKey: "AIzaSyBQl9xUuXyZGpJAX8PyByImmRYQ9mH0L9Q",
   authDomain: "fitandferm.firebaseapp.com",
@@ -49,13 +61,13 @@ export default function PastelFitApp() {
   const [isOfflineMode, setIsOfflineMode] = useState(isLocalMode);
   const isLocal = isOfflineMode;
 
-  // Global States (Firebase Sync)
   const [users, setUsers] = useState([]);
   const [foodLogs, setFoodLogs] = useState([]);
   const [exerciseLogs, setExerciseLogs] = useState([]); 
   const [measurements, setMeasurements] = useState([]);
   const [tdeeData, setTdeeData] = useState({});
   const [coachNotes, setCoachNotes] = useState({});
+  const [chatMessages, setChatMessages] = useState([]);
 
   useEffect(() => {
     if (isLocalMode) {
@@ -88,12 +100,15 @@ export default function PastelFitApp() {
       setCoachNotes({
         'u1': 'วันนี้ทานโปรตีนน้อยไปนิดนึงนะคะ พรุ่งนี้ลองเพิ่มไข่ต้มสัก 2 ฟองค่ะ 💪'
       });
+      setChatMessages([
+        { id: 'msg1', senderName: 'Admin', text: 'ยินดีต้อนรับสู่ PastelFit สอบถามพูดคุยได้เลยค่ะ 🌸', timestamp: new Date().toISOString() }
+      ]);
       return;
     }
 
     if (!firebaseUser) return;
 
-    const refs = ['users', 'foodLogs', 'exerciseLogs', 'measurements', 'tdeeData', 'coachNotes'].map(
+    const refs = ['users', 'foodLogs', 'exerciseLogs', 'measurements', 'tdeeData', 'coachNotes', 'chatMessages'].map(
       col => collection(db, 'artifacts', appId, 'public', 'data', col)
     );
 
@@ -116,9 +131,12 @@ export default function PastelFitApp() {
     const unsubNotes = onSnapshot(refs[5], (snap) => {
       const obj = {}; snap.docs.forEach(d => obj[d.id] = d.data().text); setCoachNotes(obj);
     });
+    const unsubChat = onSnapshot(refs[6], (snap) => {
+      setChatMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=> new Date(a.timestamp) - new Date(b.timestamp)));
+    }, console.error);
 
-    return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); };
-  }, [firebaseUser]);
+    return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); unsubChat(); };
+  }, [firebaseUser, isOfflineMode]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -131,10 +149,30 @@ export default function PastelFitApp() {
   };
 
   if (!currentUser) {
+    const handleSendChat = (e) => {
+      e.preventDefault();
+      const name = e.target.chatName.value.trim();
+      const text = e.target.chatText.value.trim();
+      if (!name || !text) return;
+      
+      const newMsg = {
+        id: generateId(),
+        senderName: name,
+        text: text,
+        timestamp: new Date().toISOString()
+      };
+      
+      if (isOfflineMode) {
+        setChatMessages(prev => [...prev, newMsg]);
+      } else {
+        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chatMessages', newMsg.id), newMsg);
+      }
+      e.target.chatText.value = '';
+    };
+
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-pink-50 pb-20 font-sans">
-        <div className="max-w-5xl mx-auto px-4 pt-20">
-           <div className="mt-10 bg-white p-8 rounded-3xl shadow-xl max-w-md mx-auto text-center border border-pink-100">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-pink-50 py-10 font-sans flex flex-col items-center px-4 overflow-y-auto">
+           <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center border border-pink-100 mb-8 shrink-0">
              <div className="text-5xl mb-4">🌸</div>
              <h2 className="text-2xl font-bold text-gray-800 mb-2">PastelFit</h2>
              <p className="text-gray-500 mb-6">เข้าสู่ระบบเพื่อใช้งาน</p>
@@ -148,7 +186,37 @@ export default function PastelFitApp() {
                <button type="submit" className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-2xl shadow-md transition transform hover:-translate-y-1">เข้าสู่ระบบ</button>
              </form>
            </div>
-        </div>
+
+           <div className="bg-white p-6 rounded-3xl shadow-lg w-full max-w-md border border-blue-100 flex flex-col shrink-0">
+             <div className="flex items-center gap-2 mb-4 justify-center">
+               <span className="text-2xl">💬</span>
+               <h3 className="text-xl font-bold text-gray-800">กระดานพูดคุย (Public)</h3>
+             </div>
+             
+             <div className="bg-slate-50 flex-1 rounded-2xl p-4 mb-4 h-64 overflow-y-auto border border-gray-100 flex flex-col gap-3">
+               {chatMessages.length === 0 ? (
+                 <p className="text-center text-gray-400 text-sm mt-10 font-medium">ยังไม่มีข้อความ... เริ่มพูดคุยเลย!</p>
+               ) : (
+                 chatMessages.map(msg => (
+                   <div key={msg.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-left animate-fade-in">
+                     <div className="flex justify-between items-baseline mb-1">
+                       <span className="font-bold text-sm text-blue-600">{msg.senderName}</span>
+                       <span className="text-[10px] text-gray-400">{new Date(msg.timestamp).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
+                     </div>
+                     <p className="text-sm text-gray-700 break-words">{msg.text}</p>
+                   </div>
+                 ))
+               )}
+             </div>
+             
+             <form onSubmit={handleSendChat} className="flex flex-col gap-2">
+               <input type="text" name="chatName" placeholder="ชื่อของคุณ" required className="w-full p-3 bg-gray-50 rounded-xl outline-none border border-gray-200 text-sm font-medium" />
+               <div className="flex gap-2">
+                 <input type="text" name="chatText" placeholder="พิมพ์ข้อความ..." required className="w-full p-3 bg-gray-50 rounded-xl outline-none border border-gray-200 text-sm flex-1 font-medium" />
+                 <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-3 rounded-xl shadow-md transition">ส่ง</button>
+               </div>
+             </form>
+           </div>
       </div>
     );
   }
@@ -160,18 +228,19 @@ export default function PastelFitApp() {
           <div className="flex items-center gap-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">🌸 PastelFit</div>
           <div className="flex items-center gap-4">
             <span className="text-gray-600 text-sm font-medium">{currentUser.name}</span>
-            <button onClick={() => setCurrentUser(null)} className="text-sm text-pink-500 hover:text-pink-600 font-medium">ออก</button>
+            <button onClick={() => setCurrentUser(null)} className="text-sm text-pink-500 hover:text-pink-600 font-medium bg-pink-50 px-3 py-1 rounded-full">ออก</button>
           </div>
         </div>
       </nav>
       
       {currentUser.role === 'user' && (
-        <div className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-3 z-50 px-2 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-          <NavBtn id="dashboard" icon="📊" label="สรุปวัน" />
+        <div className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-2 z-50 px-1 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] text-[10px]">
+          <NavBtn id="dashboard" icon="📊" label="สรุป" />
           <NavBtn id="ai" icon="📸" label="สแกน" />
-          <NavBtn id="exercise" icon="🏃" label="ออกกำลัง" />
+          <NavBtn id="exercise" icon="🏃" label="กิจกรรม" />
           <NavBtn id="measure" icon="📏" label="สัดส่วน" />
           <NavBtn id="tdee" icon="⚙️" label="เป้าหมาย" />
+          <NavBtn id="rank" icon="🏆" label="อันดับ" />
         </div>
       )}
 
@@ -194,8 +263,8 @@ export default function PastelFitApp() {
   );
 
   const NavBtn = ({ id, icon, label }) => (
-    <button onClick={() => setActiveTab(id)} className={`flex flex-col items-center flex-1 ${activeTab === id ? 'text-pink-500' : 'text-gray-400'}`}>
-      <span className="text-xl mb-1">{icon}</span><span className="text-[10px] font-medium">{label}</span>
+    <button onClick={() => setActiveTab(id)} className={`flex flex-col items-center flex-1 min-w-0 ${activeTab === id ? 'text-pink-500' : 'text-gray-400'}`}>
+      <span className="text-xl mb-1">{icon}</span><span className="text-[9px] sm:text-[10px] font-bold truncate w-full text-center">{label}</span>
     </button>
   );
   
@@ -207,13 +276,13 @@ export default function PastelFitApp() {
 
   const AIFoodScanner = () => {
     const [image, setImage] = useState(null);
-    const [textInput, setTextInput] = useState(''); // เพิ่ม state สำหรับเก็บข้อความ
+    const [textInput, setTextInput] = useState('');
     const [isScanning, setIsScanning] = useState(false);
     const [predictions, setPredictions] = useState(null);
     const [result, setResult] = useState(null); 
     const [editForm, setEditForm] = useState({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0 });
-    const [baseNutrition, setBaseNutrition] = useState(null); // เก็บค่าโภชนาการดั้งเดิมสำหรับคูณสัดส่วน
-    const [activePortion, setActivePortion] = useState(1); // เก็บสถานะปุ่มที่เลือก
+    const [baseNutrition, setBaseNutrition] = useState(null);
+    const [activePortion, setActivePortion] = useState(1);
     const [mealType, setMealType] = useState('lunch');
     const [errorMsg, setErrorMsg] = useState('');
     
@@ -241,7 +310,7 @@ export default function PastelFitApp() {
       if (mode === 'text' && !textInput.trim()) return;
       
       setIsScanning(true); setErrorMsg('');
-      if (mode === 'text') setImage(null); // ล้างรูปภาพถ้าเลือกค้นหาด้วยข้อความ
+      if (mode === 'text') setImage(null);
       
       try {
         let parts = [];
@@ -251,16 +320,11 @@ export default function PastelFitApp() {
           const prompt = `Analyze this image of food. Respond ONLY with a valid JSON array of up to 3 objects in this exact format: [{"name": "ชื่ออาหารภาษาไทย", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]`;
           parts = [{ text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } }];
         } else {
-          // คำสั่ง Prompt สำหรับโหมดข้อความ
           const prompt = `Analyze the nutritional value of this food item: "${textInput}". Respond ONLY with a valid JSON array of up to 3 objects (different variations or portion sizes if applicable) in this exact format: [{"name": "ชื่ออาหารภาษาไทย", "calories": 0, "protein": 0, "carbs": 0, "fat": 0}]`;
           parts = [{ text: prompt }];
         }
 
-        const requestBody = {
-          contents: [{ role: "user", parts: parts }],
-          generationConfig: { responseMimeType: "application/json" }
-        };
-
+        const requestBody = { contents: [{ role: "user", parts: parts }], generationConfig: { responseMimeType: "application/json" } };
         const modelsToTry = ['gemini-3.6-flash', 'gemini-3.1-pro', 'gemini-2.5-flash', 'gemini-1.5-flash'];
         let response = null;
         let lastErrorMsg = '';
@@ -290,16 +354,15 @@ export default function PastelFitApp() {
         setPredictions(preds); 
         setResult(preds[0]); 
         setEditForm(preds[0]);
-        setBaseNutrition(preds[0]); // เก็บค่าตั้งต้น
+        setBaseNutrition(preds[0]);
         setActivePortion(1);
       } catch (error) {
-        setErrorMsg(error.message || "วิเคราะห์ภาพล้มเหลว ลองใหม่อีกครั้ง");
+        setErrorMsg(error.message || "วิเคราะห์ล้มเหลว ลองใหม่อีกครั้ง");
       } finally {
         setIsScanning(false);
       }
     };
 
-    // อัปเดตฟังก์ชัน Portion ให้คำนวณจาก baseNutrition เสมอ เพื่อไม่ให้ค่าเพี้ยนเมื่อกดซ้ำ
     const adjustPortion = (multiplier) => {
       if(!baseNutrition) return;
       setActivePortion(multiplier);
@@ -312,12 +375,10 @@ export default function PastelFitApp() {
       }));
     };
 
-    // หากผู้ใช้พิมพ์แก้ไขตัวเลขเอง ให้ถือว่าค่านั้นเป็นค่า Base ใหม่
     const handleManualEdit = (field, value) => {
        const numVal = Number(value);
        setEditForm(prev => ({...prev, [field]: numVal}));
        if(baseNutrition) {
-          // คำนวณกลับไปเป็น base 100% เผื่อกรณีกดสัดส่วนใหม่
           setBaseNutrition(prev => ({...prev, [field]: activePortion > 0 ? numVal / activePortion : numVal}));
        }
     };
@@ -326,20 +387,16 @@ export default function PastelFitApp() {
       const newLog = {
         id: generateId(), 
         userId: currentUser.id, 
-        date: getTodayString(), 
+        // ใช้วันที่ที่ปรับ 04:00 น. แล้ว
+        date: getEffectiveDateString(), 
         timestamp: new Date().toISOString(),
         meal: mealType, 
-        // นำ imageUrl ออกเพื่อป้องกันปัญหาขนาดไฟล์เกินโควต้า
         ...editForm
       };
       if (isLocal) setFoodLogs(prev => [newLog, ...prev]);
       else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'foodLogs', newLog.id), newLog);
       
-      // ล้างค่ารูปภาพหลังจากบันทึกเสร็จ เพื่อเคลียร์หน่วยความจำ
-      setImage(null);
-      setTextInput(''); // ล้างข้อความ
-      setPredictions(null);
-      
+      setImage(null); setTextInput(''); setPredictions(null);
       setActiveTab('dashboard');
     };
 
@@ -355,9 +412,8 @@ export default function PastelFitApp() {
                <h3 className="font-bold text-yellow-800 text-sm">🔑 ตั้งค่า Gemini API Key</h3>
                {geminiKey && <button onClick={() => setShowKeySettings(false)} className="text-xs text-yellow-600 underline">ปิด</button>}
             </div>
-            <p className="text-xs text-yellow-700 mb-3">ใช้ฟรีได้โดยนำ API Key จาก Google AI Studio มาใส่ (เก็บเฉพาะในเครื่องของคุณเท่านั้น)</p>
-            <input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="AIzaSy..." className="w-full p-2 rounded-xl border border-yellow-300 mb-2 text-sm" />
-            <button onClick={() => saveGeminiKey(geminiKey)} className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-4 py-2 rounded-lg">บันทึก API Key</button>
+            <input type="password" value={geminiKey} onChange={e => setGeminiKey(e.target.value)} placeholder="AIzaSy..." className="w-full p-3 rounded-xl border border-yellow-300 mb-2 text-sm" />
+            <button onClick={() => saveGeminiKey(geminiKey)} className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold px-4 py-2 rounded-lg">บันทึก</button>
           </div>
         )}
 
@@ -367,7 +423,6 @@ export default function PastelFitApp() {
            </div>
         )}
 
-        {}
         {!image && !predictions && !isScanning && (
           <div className="space-y-4">
             <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-pink-300 border-dashed rounded-3xl cursor-pointer bg-pink-50 hover:bg-pink-100 transition-colors">
@@ -378,27 +433,17 @@ export default function PastelFitApp() {
             
             <div className="flex items-center gap-4 py-2">
                 <div className="h-px bg-gray-200 flex-1"></div>
-                <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">หรือ พิมพ์ชื่ออาหาร</span>
+                <span className="text-gray-400 font-bold text-xs uppercase tracking-wider">หรือ พิมพ์ชื่อ</span>
                 <div className="h-px bg-gray-200 flex-1"></div>
             </div>
 
             <div className="flex flex-col md:flex-row gap-2">
-                <input 
-                    type="text" 
-                    value={textInput} 
-                    onChange={e => setTextInput(e.target.value)} 
-                    placeholder="เช่น ข้าวกะเพราหมูกรอบ, ชาเขียวปั่น" 
-                    className="flex-1 p-4 bg-gray-50 rounded-2xl border border-gray-200 outline-none focus:border-pink-400 focus:bg-white transition"
-                    onKeyDown={e => e.key === 'Enter' && runCustomAI('text')}
-                />
-                <button onClick={() => runCustomAI('text')} className="bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition whitespace-nowrap">
-                    ค้นหา 🔍
-                </button>
+                <input type="text" value={textInput} onChange={e => setTextInput(e.target.value)} placeholder="เช่น ข้าวกะเพรา, ชาเขียว" className="flex-1 p-4 bg-gray-50 rounded-2xl border border-gray-200 outline-none focus:border-pink-400 focus:bg-white transition" onKeyDown={e => e.key === 'Enter' && runCustomAI('text')} />
+                <button onClick={() => runCustomAI('text')} className="bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-6 rounded-2xl shadow-sm transition whitespace-nowrap">ค้นหา 🔍</button>
             </div>
           </div>
         )}
 
-        {}
         {image && !predictions && (
           <div className="space-y-4 animate-fade-in">
             <div className="relative rounded-3xl overflow-hidden shadow-md bg-black">
@@ -412,15 +457,13 @@ export default function PastelFitApp() {
           </div>
         )}
 
-        {}
         {!image && !predictions && isScanning && (
           <div className="bg-pink-50 p-10 rounded-3xl border border-pink-100 flex flex-col items-center justify-center animate-pulse mt-4">
             <span className="text-4xl mb-4 block">🤖</span>
-            <p className="text-pink-600 font-bold">AI กำลังค้นหาข้อมูลโภชนาการ...</p>
+            <p className="text-pink-600 font-bold">AI กำลังค้นหาข้อมูล...</p>
           </div>
         )}
 
-        {}
         {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-2xl text-sm font-bold border border-red-200 mt-4">{errorMsg}</div>}
 
         {predictions && (
@@ -429,12 +472,6 @@ export default function PastelFitApp() {
                <h3 className="font-bold text-gray-800">ผลการวิเคราะห์</h3>
                <button onClick={() => {setImage(null); setPredictions(null); setTextInput('');}} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-200 font-bold shadow-sm">← สแกนใหม่</button>
             </div>
-
-            {image && (
-              <div className="relative rounded-3xl overflow-hidden shadow-sm bg-black h-32 md:h-48 mb-4">
-                <img src={image} className="w-full h-full object-cover opacity-80" alt="Food" />
-              </div>
-            )}
 
             <div className="bg-blue-50 p-5 rounded-3xl shadow-sm border border-blue-100">
               <h3 className="font-bold text-blue-900 mb-3 text-sm">💡 AI ประเมินว่าอาจจะเป็น:</h3>
@@ -448,33 +485,33 @@ export default function PastelFitApp() {
                 </div>
 
                 <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm">
-                  <label className="text-xs font-bold text-gray-700 block mb-1">ชื่ออาหาร / รายการ</label>
-                  <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full p-3 rounded-xl border border-gray-200 mb-4 bg-gray-50 focus:bg-white focus:border-blue-400 outline-none transition-colors" />
+                  <label className="text-xs font-bold text-gray-700 block mb-1">ชื่ออาหาร</label>
+                  <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full p-3 rounded-xl border border-gray-200 mb-4 bg-gray-50 focus:bg-white focus:border-blue-400 outline-none" />
 
                   <div className="mb-4">
                     <label className="text-xs font-bold text-blue-800 block mb-2">🍽️ ปริมาณที่ทาน (Portion)</label>
                     <div className="flex flex-wrap gap-2">
-                       <button onClick={() => adjustPortion(1)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 1 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>ทานหมด 100%</button>
-                       <button onClick={() => adjustPortion(0.5)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 0.5 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>ครึ่งเดียว 50%</button>
-                       <button onClick={() => adjustPortion(0.25)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 0.25 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>ชิมนิดหน่อย 25%</button>
-                       <button onClick={() => adjustPortion(2)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 2 ? 'bg-orange-500 text-white shadow-sm' : 'bg-orange-50 text-orange-700 hover:bg-orange-100 border border-orange-200'}`}>เบิ้ล 2 จาน 200%</button>
+                       <button onClick={() => adjustPortion(1)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 1 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600'}`}>100%</button>
+                       <button onClick={() => adjustPortion(0.5)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 0.5 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600'}`}>ครึ่งเดียว 50%</button>
+                       <button onClick={() => adjustPortion(0.25)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 0.25 ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 text-gray-600'}`}>ชิมนิดหน่อย 25%</button>
+                       <button onClick={() => adjustPortion(2)} className={`px-3 py-1.5 font-semibold text-xs rounded-xl transition ${activePortion === 2 ? 'bg-orange-500 text-white shadow-sm' : 'bg-orange-50 text-orange-700 border border-orange-200'}`}>เบิ้ล 2 จาน</button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 focus-within:border-pink-300">
+                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
                       <label className="text-[10px] font-bold text-gray-500 uppercase">แคลอรี่</label>
                       <input type="number" value={editForm.calories} onChange={e => handleManualEdit('calories', e.target.value)} className="w-full bg-transparent font-bold text-pink-600 text-lg outline-none" />
                     </div>
-                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100 focus-within:border-blue-300">
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
                       <label className="text-[10px] font-bold text-blue-500 uppercase">โปรตีน (g)</label>
                       <input type="number" value={editForm.protein} onChange={e => handleManualEdit('protein', e.target.value)} className="w-full bg-transparent font-bold text-blue-700 text-lg outline-none" />
                     </div>
-                    <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-100 focus-within:border-yellow-300">
+                    <div className="bg-yellow-50 p-3 rounded-xl border border-yellow-100">
                       <label className="text-[10px] font-bold text-yellow-600 uppercase">คาร์บ (g)</label>
                       <input type="number" value={editForm.carbs} onChange={e => handleManualEdit('carbs', e.target.value)} className="w-full bg-transparent font-bold text-yellow-700 text-lg outline-none" />
                     </div>
-                    <div className="bg-red-50 p-3 rounded-xl border border-red-100 focus-within:border-red-300">
+                    <div className="bg-red-50 p-3 rounded-xl border border-red-100">
                       <label className="text-[10px] font-bold text-red-500 uppercase">ไขมัน (g)</label>
                       <input type="number" value={editForm.fat} onChange={e => handleManualEdit('fat', e.target.value)} className="w-full bg-transparent font-bold text-red-700 text-lg outline-none" />
                     </div>
@@ -516,7 +553,7 @@ export default function PastelFitApp() {
        const newRecord = {
          id: generateId(),
          userId: uid,
-         date: getTodayString(),
+         date: getEffectiveDateString(),
          timestamp: new Date().toISOString(),
          weight: Number(form.weight) || 0,
          chest: Number(form.chest) || 0,
@@ -531,18 +568,10 @@ export default function PastelFitApp() {
 
        if(isLocal) {
          setMeasurements(prev => [newRecord, ...prev]);
-         // แก้ไข: รวมข้อมูลโปรไฟล์เดิมไว้ ไม่ให้ค่าอื่นๆ (ความสูง, อายุ) หายไป
-         setTdeeData(prev => ({
-            ...prev,
-            [uid]: { targetCalories: currentTarget, profile: { ...currentProfile, weight: Number(form.weight) } }
-         }));
+         setTdeeData(prev => ({ ...prev, [uid]: { targetCalories: currentTarget, profile: { ...currentProfile, weight: Number(form.weight) } } }));
        } else {
          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', newRecord.id), newRecord);
-         // แก้ไขบัค: Firestore merge:true กับ object ซ้อน จะทับ object ในระดับนั้นเลย ต้องส่งค่าเดิมไปด้วย
-         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), {
-            targetCalories: currentTarget,
-            profile: { ...currentProfile, weight: Number(form.weight) }
-         }, { merge: true });
+         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), { targetCalories: currentTarget, profile: { ...currentProfile, weight: Number(form.weight) } }, { merge: true });
        }
        setForm({ weight: '', chest: '', waist: '', arm: '', leg: '', neck: '' });
        setMsg("บันทึกสัดส่วนสำเร็จ!");
@@ -555,89 +584,42 @@ export default function PastelFitApp() {
           <div className="text-center mb-6">
             <span className="text-4xl mb-2 block">📏</span>
             <h2 className="text-2xl font-bold text-gray-800">บันทึกสัดส่วนร่างกาย</h2>
-            <p className="text-sm text-gray-500 mb-2">อัปเดตน้ำหนักสำหรับการคำนวณแคลอรี่ (โดยไม่รีเซ็ตเป้าหมายเดิม)</p>
             {msg && <span className="text-xs font-bold text-white bg-purple-500 px-3 py-1 rounded-full shadow-sm">{msg}</span>}
           </div>
 
           {!isReadOnly && (
             <div className="bg-purple-50 p-5 rounded-2xl border border-purple-100 mb-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">น้ำหนัก (กก.) *</label>
-                  <input type="number" step="0.1" value={form.weight} onChange={e=>setForm({...form, weight: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 60.5" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">รอบอก (นิ้ว)</label>
-                  <input type="number" step="0.1" value={form.chest} onChange={e=>setForm({...form, chest: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 34" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">รอบเอว (นิ้ว)</label>
-                  <input type="number" step="0.1" value={form.waist} onChange={e=>setForm({...form, waist: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 28" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">รอบแขน (นิ้ว)</label>
-                  <input type="number" step="0.1" value={form.arm} onChange={e=>setForm({...form, arm: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 11" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">รอบขา (นิ้ว)</label>
-                  <input type="number" step="0.1" value={form.leg} onChange={e=>setForm({...form, leg: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 21" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-purple-800 block mb-1">รอบคอ (นิ้ว)</label>
-                  <input type="number" step="0.1" value={form.neck} onChange={e=>setForm({...form, neck: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="เช่น 14" />
-                </div>
+                {['weight', 'chest', 'waist', 'arm', 'leg', 'neck'].map((field) => (
+                   <div key={field}>
+                     <label className="text-xs font-bold text-purple-800 block mb-1">{field === 'weight' ? 'น้ำหนัก (กก.) *' : `รอบ${field==='chest'?'อก':field==='waist'?'เอว':field==='arm'?'แขน':field==='leg'?'ขา':'คอ'} (นิ้ว)`}</label>
+                     <input type="number" step="0.1" value={form[field]} onChange={e=>setForm({...form, [field]: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="0.0" />
+                   </div>
+                ))}
               </div>
               <button onClick={handleSave} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl shadow-md transition">บันทึกสัดส่วนวันนี้</button>
             </div>
           )}
 
-          <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2"><span>📈</span> ประวัติการบันทึก</h3>
-          {userMeasurements.length === 0 ? (
-            <p className="text-center text-sm text-gray-400 py-6">ยังไม่มีประวัติการบันทึก</p>
-          ) : (
-            <div className="space-y-4">
+          <h3 className="font-bold text-gray-800 mb-4">ประวัติการบันทึก</h3>
+          <div className="space-y-4">
               {userMeasurements.map((m) => (
                 <div key={m.id} className="p-4 bg-white border border-gray-100 shadow-sm rounded-2xl relative">
                   <div className="flex justify-between items-center mb-3">
-                     <p className="font-bold text-gray-800 text-sm bg-purple-50 px-3 py-1 rounded-full text-purple-800 inline-block">{formatDate(m.timestamp)}</p>
-                     {!isReadOnly && (
-                        <button onClick={() => {
-                            if(isLocal) setMeasurements(prev => prev.filter(x => x.id !== m.id));
-                            else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', m.id));
-                        }} className="text-xs text-red-400 hover:text-red-600 hover:underline">ลบข้อมูล</button>
-                     )}
+                     <p className="font-bold text-gray-800 text-sm bg-purple-50 px-3 py-1 rounded-full text-purple-800">{formatDate(m.timestamp)}</p>
+                     {!isReadOnly && <button onClick={() => { if(isLocal) setMeasurements(prev => prev.filter(x => x.id !== m.id)); else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', m.id)); }} className="text-xs text-red-400 hover:text-red-600">ลบข้อมูล</button>}
                   </div>
-                  
-                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center bg-gray-50 p-3 rounded-xl border border-gray-100">
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">น้ำหนัก</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.weight} <span className="text-[10px] font-normal text-gray-400">กก.</span></p>
-                     </div>
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">รอบอก</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.chest || '-'} <span className="text-[10px] font-normal text-gray-400">นิ้ว</span></p>
-                     </div>
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">รอบเอว</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.waist || '-'} <span className="text-[10px] font-normal text-gray-400">นิ้ว</span></p>
-                     </div>
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">รอบแขน</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.arm || '-'} <span className="text-[10px] font-normal text-gray-400">นิ้ว</span></p>
-                     </div>
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">รอบขา</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.leg || '-'} <span className="text-[10px] font-normal text-gray-400">นิ้ว</span></p>
-                     </div>
-                     <div className="flex flex-col justify-center bg-white p-2 rounded-lg shadow-sm">
-                       <p className="text-[10px] font-bold text-gray-500 uppercase">รอบคอ</p>
-                       <p className="font-bold text-purple-600 text-sm">{m.neck || '-'} <span className="text-[10px] font-normal text-gray-400">นิ้ว</span></p>
-                     </div>
+                  <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center bg-gray-50 p-3 rounded-xl">
+                     {[{l:'น้ำหนัก',v:m.weight,u:'กก.'}, {l:'รอบอก',v:m.chest,u:'นิ้ว'}, {l:'รอบเอว',v:m.waist,u:'นิ้ว'}, {l:'รอบแขน',v:m.arm,u:'นิ้ว'}, {l:'รอบขา',v:m.leg,u:'นิ้ว'}, {l:'รอบคอ',v:m.neck,u:'นิ้ว'}].map((item, i) => (
+                       <div key={i} className="bg-white p-2 rounded-lg shadow-sm">
+                         <p className="text-[10px] font-bold text-gray-500 uppercase">{item.l}</p>
+                         <p className="font-bold text-purple-600 text-sm">{item.v || '-'} <span className="text-[10px] font-normal text-gray-400">{item.u}</span></p>
+                       </div>
+                     ))}
                   </div>
                 </div>
               ))}
-            </div>
-          )}
+          </div>
         </div>
       </div>
     );
@@ -651,12 +633,12 @@ export default function PastelFitApp() {
 
     const activities = [
       { id: 'walk', name: 'เดิน (ชิลๆ)', met: 3.5, icon: '🚶' },
-      { id: 'run', name: 'วิ่ง / จ็อกกิ้ง', met: 8.0, icon: '🏃' },
+      { id: 'run', name: 'วิ่ง', met: 8.0, icon: '🏃' },
       { id: 'cycle', name: 'ปั่นจักรยาน', met: 6.0, icon: '🚴' },
       { id: 'swim', name: 'ว่ายน้ำ', met: 7.0, icon: '🏊' },
-      { id: 'weight', name: 'เวทเทรนนิ่ง', met: 3.5, icon: '🏋️' },
+      { id: 'weight', name: 'เวท', met: 3.5, icon: '🏋️' },
       { id: 'yoga', name: 'โยคะ', met: 3.0, icon: '🧘' },
-      { id: 'aerobic', name: 'เต้นแอโรบิค', met: 6.5, icon: '💃' },
+      { id: 'aerobic', name: 'แอโรบิค', met: 6.5, icon: '💃' },
     ];
 
     const currentActivity = activities.find(a => a.id === form.activity);
@@ -665,12 +647,11 @@ export default function PastelFitApp() {
     const saveExercise = () => {
       if(isReadOnly) return;
       const newLog = {
-        id: generateId(), userId: uid, date: getTodayString(), timestamp: new Date().toISOString(),
+        id: generateId(), userId: uid, date: getEffectiveDateString(), timestamp: new Date().toISOString(),
         activityName: currentActivity.name, icon: currentActivity.icon, minutes: form.minutes, calories: calculatedBurn
       };
       if (isLocal) setExerciseLogs(prev => [newLog, ...prev]);
       else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'exerciseLogs', newLog.id), newLog);
-      
       setActiveTab('dashboard');
     };
 
@@ -679,34 +660,25 @@ export default function PastelFitApp() {
         <div className="text-center mb-6">
           <span className="text-4xl mb-2 block">🏃‍♀️</span>
           <h2 className="text-2xl font-bold text-gray-800">บันทึกการออกกำลังกาย</h2>
-          <p className="text-sm text-gray-500">คำนวณแคลอรี่ให้อัตโนมัติตามน้ำหนักตัว ({userWeight} กก.)</p>
         </div>
-
         {!isReadOnly && (
           <div className="space-y-5">
-            <div>
-              <label className="text-sm font-bold text-gray-700 block mb-3">เลือกประเภทกีฬา</label>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {activities.map(act => (
-                  <button key={act.id} onClick={() => setForm({...form, activity: act.id})} className={`p-3 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition ${form.activity === act.id ? 'bg-green-50 border-green-400 text-green-800 shadow-sm' : 'bg-white border-gray-100 text-gray-500 hover:border-green-200'}`}>
-                    <span className="text-2xl">{act.icon}</span>
-                    <span className="text-xs font-bold">{act.name}</span>
-                  </button>
-                ))}
-              </div>
+            <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+              {activities.map(act => (
+                <button key={act.id} onClick={() => setForm({...form, activity: act.id})} className={`p-3 rounded-2xl border-2 flex flex-col items-center gap-1 transition ${form.activity === act.id ? 'bg-green-50 border-green-400 text-green-800 shadow-sm' : 'bg-white border-gray-100 text-gray-500'}`}>
+                  <span className="text-2xl">{act.icon}</span><span className="text-[10px] font-bold">{act.name}</span>
+                </button>
+              ))}
             </div>
-
             <div>
-              <label className="text-sm font-bold text-gray-700 block mb-2">ระยะเวลา (นาที)</label>
-              <input type="number" value={form.minutes} onChange={e => setForm({...form, minutes: Number(e.target.value)})} className="w-full p-4 rounded-2xl border border-green-200 outline-none focus:ring-2 focus:ring-green-400 text-2xl font-bold text-center bg-green-50 text-green-800" />
+              <label className="text-sm font-bold text-gray-700 block mb-2">เวลา (นาที)</label>
+              <input type="number" value={form.minutes} onChange={e => setForm({...form, minutes: Number(e.target.value)})} className="w-full p-4 rounded-2xl border border-green-200 outline-none text-2xl font-bold text-center bg-green-50 text-green-800" />
             </div>
-
             <div className="bg-gradient-to-r from-green-400 to-emerald-500 text-white p-5 rounded-3xl text-center shadow-md">
-              <p className="text-sm font-bold opacity-90 mb-1">🔥 คาดว่าเผาผลาญไป</p>
+              <p className="text-sm font-bold opacity-90 mb-1">🔥 เผาผลาญไป</p>
               <p className="text-5xl font-extrabold">{calculatedBurn} <span className="text-lg font-normal">kcal</span></p>
             </div>
-
-            <button onClick={saveExercise} className="w-full bg-gray-800 text-white font-bold py-4 rounded-2xl shadow-md hover:bg-black transition transform hover:-translate-y-1">บันทึกกิจกรรม</button>
+            <button onClick={saveExercise} className="w-full bg-gray-800 text-white font-bold py-4 rounded-2xl shadow-md hover:bg-black transition">บันทึกกิจกรรม</button>
           </div>
         )}
       </div>
@@ -716,27 +688,29 @@ export default function PastelFitApp() {
   const Dashboard = ({ targetUserId }) => {
     const uid = targetUserId || currentUser.id;
     const isReadOnly = uid !== currentUser.id;
+    const todayDate = getEffectiveDateString(); // ใช้วันที่ที่อิงเวลา 04:00 น.
     
-    const todayFood = foodLogs.filter(log => log.userId === uid && log.date === getTodayString());
-    const todayEx = exerciseLogs.filter(log => log.userId === uid && log.date === getTodayString());
+    const todayFood = foodLogs.filter(log => log.userId === uid && log.date === todayDate);
+    const todayEx = exerciseLogs.filter(log => log.userId === uid && log.date === todayDate);
     const uTdee = tdeeData[uid] || { targetCalories: 2000, profile: { weight: 60 } };
     const myCoachNote = coachNotes[uid];
     
-    const consumed = todayFood.reduce((acc, curr) => acc + curr.calories, 0);
-    const burned = todayEx.reduce((acc, curr) => acc + curr.calories, 0);
+    const consumed = Math.round(todayFood.reduce((acc, curr) => acc + (Number(curr.calories)||0), 0));
+    const burned = Math.round(todayEx.reduce((acc, curr) => acc + (Number(curr.calories)||0), 0));
     
     const dailyBudget = uTdee.targetCalories + burned;
     const remaining = dailyBudget - consumed;
     const percent = Math.min((consumed / dailyBudget) * 100, 100);
 
+    // Leaderboard (ยึดตามวันปัจจุบันเท่านั้น และปัดเศษทศนิยมทิ้ง)
     const topRankings = users
       .filter(u => u.role === 'user')
       .map(u => {
-        const uFoods = foodLogs.filter(log => log.userId === u.id);
-        const protein = uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0);
-        const calories = uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0);
-        const carbs = uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0);
-        const fat = uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0);
+        const uFoods = foodLogs.filter(log => log.userId === u.id && log.date === todayDate);
+        const protein = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0));
+        const calories = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0));
+        const carbs = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0));
+        const fat = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0));
         return { ...u, protein, calories, carbs, fat };
       })
       .sort((a,b) => b.protein - a.protein)
@@ -744,18 +718,15 @@ export default function PastelFitApp() {
 
     return (
       <div className="max-w-4xl mx-auto space-y-6">
-        {isReadOnly && <div className="bg-blue-50 text-blue-700 p-4 rounded-2xl text-sm font-bold text-center flex justify-between items-center border border-blue-200 shadow-sm">
+        {isReadOnly && <div className="bg-blue-50 text-blue-700 p-4 rounded-2xl text-sm font-bold text-center flex justify-between items-center border border-blue-200">
           <span>👀 กำลังดูข้อมูลของ: {users.find(u=>u.id===uid)?.name || uid}</span>
-          <button onClick={() => setViewingUserId(null)} className="underline hover:text-blue-900 bg-white px-3 py-1 rounded-lg shadow-sm">กลับหน้ารายชื่อ</button>
+          <button onClick={() => setViewingUserId(null)} className="underline bg-white px-3 py-1 rounded-lg">กลับ</button>
         </div>}
 
         {!isReadOnly && myCoachNote && (
            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 rounded-3xl border border-blue-100 shadow-sm flex gap-4 items-start">
               <div className="text-3xl">💬</div>
-              <div>
-                <h4 className="text-blue-800 font-bold mb-1 text-sm">ข้อความแนะนำจากโค้ช</h4>
-                <p className="text-blue-900 text-sm leading-relaxed">{myCoachNote}</p>
-              </div>
+              <div><h4 className="text-blue-800 font-bold mb-1 text-sm">ข้อความแนะนำจากโค้ช</h4><p className="text-blue-900 text-sm leading-relaxed">{myCoachNote}</p></div>
            </div>
         )}
 
@@ -783,11 +754,10 @@ export default function PastelFitApp() {
           </div>
 
           <div className="lg:col-span-2 space-y-4">
-            {}
             <div className="bg-gradient-to-r from-yellow-50 to-orange-50 p-5 rounded-3xl shadow-sm border border-yellow-100">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-yellow-800 flex items-center gap-2"><span>🏆</span> Top 3 สายโปรตีน</h3>
-                {!isReadOnly && <button onClick={() => setActiveTab('rank')} className="text-xs bg-white px-3 py-1 rounded-lg text-yellow-600 font-bold hover:shadow-sm">ดูทั้งหมด</button>}
+                <h3 className="font-bold text-yellow-800 flex items-center gap-2"><span>🏆</span> Top 3 สายโปรตีนวันนี้</h3>
+                {!isReadOnly && <button onClick={() => setActiveTab('rank')} className="text-xs bg-white px-3 py-1 rounded-lg text-yellow-600 font-bold">ดูทั้งหมด</button>}
               </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {topRankings.map((u, idx) => (
@@ -795,29 +765,27 @@ export default function PastelFitApp() {
                     <div className="text-2xl drop-shadow-sm">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</div>
                     <div className="overflow-hidden flex-1">
                       <p className="font-bold text-sm text-gray-800 truncate">{u.name}</p>
-                      <p className="text-xs text-blue-600 font-extrabold">🥩 {u.protein}g โปรตีน</p>
-                      <p className="text-[10px] text-gray-400 font-bold truncate">🔥 {u.calories} kcal | C:{u.carbs}g F:{u.fat}g</p>
+                      <p className="text-xs text-blue-600 font-extrabold">🥩 {u.protein}g</p>
+                      <p className="text-[10px] text-gray-400 font-bold truncate">🔥 {u.calories} kcal</p>
                     </div>
                   </div>
                 ))}
-                {topRankings.length === 0 && <p className="text-sm font-bold text-yellow-600/50 col-span-3 text-center py-2">ยังไม่มีการจัดอันดับ</p>}
+                {topRankings.length === 0 && <p className="text-sm font-bold text-yellow-600/50 col-span-3 text-center py-2">ยังไม่มีข้อมูล</p>}
               </div>
             </div>
 
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><span>🍽️</span> อาหารที่ทานวันนี้</h3>
-              </div>
-              {todayFood.length === 0 ? <div className="text-center text-sm font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">ยังไม่ได้บันทึกอาหาร</div> : (
+              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4"><span>🍽️</span> อาหารที่ทานวันนี้</h3>
+              {todayFood.length === 0 ? <div className="text-center text-sm font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed">ยังไม่ได้บันทึกอาหาร</div> : (
                 <div className="space-y-3">
                   {todayFood.map(log => (
                     <div key={log.id} className="flex justify-between items-center bg-slate-50 p-4 rounded-2xl border border-gray-100 hover:border-pink-200 transition">
                       <div>
                         <p className="font-bold text-sm text-gray-800">{log.name}</p>
-                        <p className="text-xs text-pink-500 font-bold mt-1">P:{log.protein}g C:{log.carbs}g F:{log.fat}g</p>
+                        <p className="text-xs text-pink-500 font-bold mt-1">P:{Math.round(log.protein)}g C:{Math.round(log.carbs)}g F:{Math.round(log.fat)}g</p>
                       </div>
                       <div className="text-right flex flex-col items-end">
-                        <p className="font-bold text-pink-600 text-lg">{log.calories} <span className="text-[10px] font-normal">kcal</span></p>
+                        <p className="font-bold text-pink-600 text-lg">{Math.round(log.calories)} <span className="text-[10px] font-normal">kcal</span></p>
                         {!isReadOnly && <button onClick={() => {if(isLocal) setFoodLogs(p=>p.filter(x=>x.id!==log.id)); else deleteDoc(doc(db,'artifacts',appId,'public','data','foodLogs',log.id))}} className="text-[10px] text-gray-400 hover:text-red-500 font-bold mt-1 bg-white px-2 py-0.5 rounded-md border border-gray-100 shadow-sm">ลบ</button>}
                       </div>
                     </div>
@@ -825,12 +793,10 @@ export default function PastelFitApp() {
                 </div>
               )}
             </div>
-
+            
             <div className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2"><span>🏃‍♀️</span> กิจกรรมวันนี้</h3>
-              </div>
-              {todayEx.length === 0 ? <div className="text-center text-sm font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed border-gray-200">ยังไม่มีกิจกรรม</div> : (
+              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4"><span>🏃‍♀️</span> กิจกรรมวันนี้</h3>
+              {todayEx.length === 0 ? <div className="text-center text-sm font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed">ยังไม่มีกิจกรรม</div> : (
                 <div className="space-y-3">
                   {todayEx.map(log => (
                     <div key={log.id} className="flex justify-between items-center bg-green-50 p-4 rounded-2xl border border-green-100 hover:border-green-300 transition">
@@ -843,7 +809,7 @@ export default function PastelFitApp() {
                       </div>
                       <div className="text-right flex flex-col items-end">
                         <p className="font-bold text-green-600 text-lg">🔥 {log.calories} <span className="text-[10px] font-normal">kcal</span></p>
-                        {!isReadOnly && <button onClick={() => {if(isLocal) setExerciseLogs(p=>p.filter(x=>x.id!==log.id)); else deleteDoc(doc(db,'artifacts',appId,'public','data','exerciseLogs',log.id))}} className="text-[10px] text-gray-400 hover:text-red-500 font-bold mt-1 bg-white px-2 py-0.5 rounded-md border border-green-100 shadow-sm">ลบ</button>}
+                        {!isReadOnly && <button onClick={() => {if(isLocal) setExerciseLogs(p=>p.filter(x=>x.id!==log.id)); else deleteDoc(doc(db,'artifacts',appId,'public','data','exerciseLogs',log.id))}} className="text-[10px] text-gray-400 hover:text-red-500 font-bold mt-1 bg-white px-2 py-0.5 rounded-md shadow-sm border border-green-100">ลบ</button>}
                       </div>
                     </div>
                   ))}
@@ -858,218 +824,109 @@ export default function PastelFitApp() {
 
   const TDEECalculator = () => {
     const uid = currentUser.id;
-    // อ่านค่าล่าสุดที่บันทึกไว้ในระบบ
     const uTdee = tdeeData[uid] || { targetCalories: 2000, profile: {} };
     
-    // ตั้งค่า form ให้อ่านจาก profile ที่จำไว้ ถ้าไม่มีให้ใช้ค่าเริ่มต้น
     const [form, setForm] = useState({ 
-      gender: uTdee.profile?.gender || 'male',
-      age: uTdee.profile?.age || 30,
-      height: uTdee.profile?.height || 170,
-      weight: uTdee.profile?.weight || 60,
+      gender: uTdee.profile?.gender || 'male', age: uTdee.profile?.age || 30,
+      height: uTdee.profile?.height || 170, weight: uTdee.profile?.weight || 60,
       activityLevel: uTdee.profile?.activityLevel || '1.2' 
     });
     
     const [calculatedTdee, setCalculatedTdee] = useState(null);
     const [saved, setSaved] = useState(false);
 
-    // ทำการ Sync ค่าจาก Database กลับมาที่ Form เมื่อข้อมูลโหลดเสร็จ
     useEffect(() => {
        if (uTdee && uTdee.profile && Object.keys(uTdee.profile).length > 0) {
-           setForm(prev => ({
-               ...prev,
-               ...uTdee.profile
-           }));
+           setForm(prev => ({...prev, ...uTdee.profile}));
        }
     }, [uTdee?.profile]);
 
     const activityLevels = [
-      { value: '1.2', label: 'ไม่ออกกำลังกายเลยหรือน้อยมาก' },
-      { value: '1.375', label: 'ออกกำลังกายเล็กน้อย (1-3 วัน/สัปดาห์)' },
-      { value: '1.55', label: 'ออกกำลังกายปานกลาง (3-5 วัน/สัปดาห์)' },
-      { value: '1.725', label: 'ออกกำลังกายหนัก (6-7 วัน/สัปดาห์)' },
-      { value: '1.9', label: 'ออกกำลังกายหนักมาก (ทุกวัน หรือนักกีฬา)' },
+      { value: '1.2', label: 'ไม่ออกกำลังกาย' }, { value: '1.375', label: 'เล็กน้อย (1-3 วัน/สัปดาห์)' },
+      { value: '1.55', label: 'ปานกลาง (3-5 วัน/สัปดาห์)' }, { value: '1.725', label: 'หนัก (6-7 วัน/สัปดาห์)' },
+      { value: '1.9', label: 'หนักมาก (ทุกวัน)' }
     ];
 
     const calculateTDEE = () => {
-      let bmr = 0;
-      if (form.gender === 'male') {
-        bmr = (10 * form.weight) + (6.25 * form.height) - (5 * form.age) + 5;
-      } else {
-        bmr = (10 * form.weight) + (6.25 * form.height) - (5 * form.age) - 161;
-      }
+      let bmr = form.gender === 'male' ? 
+        (10 * form.weight) + (6.25 * form.height) - (5 * form.age) + 5 :
+        (10 * form.weight) + (6.25 * form.height) - (5 * form.age) - 161;
+      
       const tdee = Math.round(bmr * parseFloat(form.activityLevel));
       setCalculatedTdee(tdee);
 
-      // บันทึกเฉพาะข้อมูล Profile (น้ำหนัก, ส่วนสูง, ฯลฯ) เพื่อให้ระบบจำไว้
-      // **สำคัญ:** จะไม่แก้ไข targetCalories จนกว่าผู้ใช้จะกดเลือกเป้าหมายในตาราง
-      const currentTarget = uTdee.targetCalories || 2000;
-      const dataToSave = { 
-          targetCalories: currentTarget, // คงค่าแคลอรี่เดิมไว้
-          profile: { ...form } // อัปเดตข้อมูลส่วนตัว
-      };
-
-      if(isLocal) {
-         setTdeeData(p => ({...p, [uid]: dataToSave}));
-      } else {
-         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), dataToSave, {merge: true});
-      }
+      const dataToSave = { targetCalories: uTdee.targetCalories || 2000, profile: { ...form } };
+      if(isLocal) setTdeeData(p => ({...p, [uid]: dataToSave}));
+      else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), dataToSave, {merge: true});
     };
     
-    // คำนวณเบื้องต้นเมื่อเปิดหน้าครั้งแรก (เผื่ออยากดูค่าเฉยๆ)
-    useEffect(() => {
-        if(form.weight) calculateTDEE();
-        // eslint-disable-next-line
-    }, []);
+    useEffect(() => { if(form.weight) calculateTDEE(); }, []);
 
     const handleSaveGoal = (targetCal) => {
-      // เมื่อกดเลือกเป้าหมาย ถึงจะทำการอัปเดต targetCalories ใหม่
-      const data = { 
-          targetCalories: targetCal, 
-          profile: { ...form } 
-      };
+      const data = { targetCalories: targetCal, profile: { ...form } };
       if(isLocal) setTdeeData(p => ({...p, [uid]: data}));
       else setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', uid), data, {merge: true});
-      
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setSaved(true); setTimeout(() => setSaved(false), 3000);
     };
 
     const getGoalOptions = (baseTdee) => [
-        { label: 'ลดน้ำหนักอย่างมาก', rate: '-1 กก./สัปดาห์', cal: baseTdee - 1000, color: 'bg-red-100 text-red-800' },
-        { label: 'ลดน้ำหนัก', rate: '-0.5 กก./สัปดาห์', cal: baseTdee - 500, color: 'bg-orange-100 text-orange-800' },
-        { label: 'ลดน้ำหนักเล็กน้อย', rate: '-0.25 กก./สัปดาห์', cal: baseTdee - 250, color: 'bg-yellow-100 text-yellow-800' },
-        { label: 'รักษาน้ำหนัก', rate: '0 กก./สัปดาห์', cal: baseTdee, color: 'bg-green-100 text-green-800' },
-        { label: 'เพิ่มน้ำหนักเล็กน้อย', rate: '+0.25 กก./สัปดาห์', cal: baseTdee + 250, color: 'bg-teal-100 text-teal-800' },
-        { label: 'เพิ่มน้ำหนัก', rate: '+0.5 กก./สัปดาห์', cal: baseTdee + 500, color: 'bg-blue-100 text-blue-800' },
-        { label: 'เพิ่มน้ำหนักอย่างมาก', rate: '+1 กก./สัปดาห์', cal: baseTdee + 1000, color: 'bg-indigo-100 text-indigo-800' }
+        { label: 'ลด 1 กก./สัปดาห์', rate: '-1000 kcal', cal: baseTdee - 1000, color: 'bg-red-100 text-red-800' },
+        { label: 'ลด 0.5 กก./สัปดาห์', rate: '-500 kcal', cal: baseTdee - 500, color: 'bg-orange-100 text-orange-800' },
+        { label: 'รักษาน้ำหนัก', rate: 'คงที่', cal: baseTdee, color: 'bg-green-100 text-green-800' },
+        { label: 'เพิ่ม 0.5 กก./สัปดาห์', rate: '+500 kcal', cal: baseTdee + 500, color: 'bg-blue-100 text-blue-800' }
     ];
 
     return (
-      <div className="max-w-5xl mx-auto">
-         <div className="text-center mb-8">
-           <h2 className="text-3xl font-bold text-gray-800">โปรแกรมคำนวณ TDEE</h2>
-           <p className="text-gray-500 mt-2">คำนวณพลังงานที่ใช้ และกำหนดเป้าหมายการกิน</p>
-         </div>
-         
-         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                 <div className="space-y-5">
-                    <div>
-                        <label className="text-sm font-bold text-gray-700 block mb-2">เพศ</label>
-                        <div className="flex gap-4">
-                            <button onClick={() => setForm({...form, gender: 'male'})} className={`flex-1 py-3 rounded-xl border-2 font-bold flex items-center justify-center gap-2 ${form.gender === 'male' ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-                                <span>♂️</span> ชาย
-                            </button>
-                            <button onClick={() => setForm({...form, gender: 'female'})} className={`flex-1 py-3 rounded-xl border-2 font-bold flex items-center justify-center gap-2 ${form.gender === 'female' ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-                                <span>♀️</span> หญิง
-                            </button>
-                        </div>
+                 <h2 className="text-xl font-bold text-gray-800 mb-6">ตั้งค่าข้อมูลส่วนตัว</h2>
+                 <div className="space-y-4">
+                    <div className="flex gap-4">
+                        <button onClick={() => setForm({...form, gender: 'male'})} className={`flex-1 py-3 rounded-xl border-2 font-bold ${form.gender === 'male' ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500'}`}>♂️ ชาย</button>
+                        <button onClick={() => setForm({...form, gender: 'female'})} className={`flex-1 py-3 rounded-xl border-2 font-bold ${form.gender === 'female' ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500'}`}>♀️ หญิง</button>
                     </div>
-
-                    <div>
-                        <label className="text-sm font-bold text-gray-700 block mb-2">อายุ (ปี)</label>
-                        <input type="number" value={form.age} onChange={e=>setForm({...form, age: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none font-bold text-gray-800" />
+                    <input type="number" value={form.age} onChange={e=>setForm({...form, age: Number(e.target.value)})} placeholder="อายุ" className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 font-bold" />
+                    <div className="flex gap-4">
+                        <input type="number" value={form.height} onChange={e=>setForm({...form, height: Number(e.target.value)})} placeholder="ส่วนสูง" className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 font-bold" />
+                        <input type="number" value={form.weight} onChange={e=>setForm({...form, weight: Number(e.target.value)})} placeholder="น้ำหนัก" className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 font-bold" />
                     </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-sm font-bold text-gray-700 block mb-2">ส่วนสูง (ซม.)</label>
-                            <input type="number" value={form.height} onChange={e=>setForm({...form, height: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none font-bold text-gray-800" />
-                        </div>
-                        <div>
-                            <label className="text-sm font-bold text-gray-700 block mb-2">น้ำหนัก (กก.)</label>
-                            <input type="number" value={form.weight} onChange={e=>setForm({...form, weight: Number(e.target.value)})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none font-bold text-gray-800" />
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-bold text-gray-700 block mb-2">ระดับกิจกรรม</label>
-                        <select value={form.activityLevel} onChange={e=>setForm({...form, activityLevel: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:border-green-500 focus:bg-white outline-none font-bold text-gray-700">
-                            {activityLevels.map(lvl => (
-                                <option key={lvl.value} value={lvl.value}>{lvl.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                    
-                    <button onClick={calculateTDEE} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-4 rounded-xl shadow-md transition transform hover:-translate-y-1 mt-4">
-                        คำนวณ TDEE ของฉัน
-                    </button>
-                    <p className="text-xs text-center text-gray-400 mt-2 font-bold">✨ เมื่อคำนวณแล้ว กรุณาเลื่อนลงเพื่อ<span className="text-green-600 underline">คลิกเลือกเป้าหมาย</span>ด้านล่าง 👇</p>
+                    <select value={form.activityLevel} onChange={e=>setForm({...form, activityLevel: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 font-bold text-gray-700">
+                        {activityLevels.map(lvl => <option key={lvl.value} value={lvl.value}>{lvl.label}</option>)}
+                    </select>
+                    <button onClick={calculateTDEE} className="w-full bg-green-700 text-white font-bold py-4 rounded-xl shadow-md">คำนวณ TDEE</button>
                  </div>
              </div>
 
-             <div className="bg-slate-50 p-6 rounded-3xl border border-gray-100 flex flex-col h-full">
-                 <div className="mb-6">
-                     <h3 className="font-bold text-green-800 mb-2">พลังงานที่ต้องการในแต่ละวัน (TDEE)</h3>
-                     <div className="flex items-baseline gap-2">
-                         <span className="text-4xl font-extrabold text-gray-800">{calculatedTdee || '-'}</span>
-                         <span className="text-gray-500 font-medium">แคลอรี่ต่อวัน</span>
-                     </div>
-                 </div>
-
-                 {calculatedTdee && (
-                    <div className="flex-1">
-                        <div className="grid grid-cols-12 gap-2 mb-3 text-xs font-bold text-gray-400 uppercase tracking-wider px-2">
-                            <div className="col-span-4">เป้าหมาย</div>
-                            <div className="col-span-4 text-center">สัดส่วน / สัปดาห์</div>
-                            <div className="col-span-4 text-right">แคลอรี่/วัน</div>
-                        </div>
-                        <div className="space-y-2">
-                            {getGoalOptions(calculatedTdee).map((opt, idx) => {
-                                const isCurrentGoal = uTdee.targetCalories === opt.cal;
-                                return (
-                                <button key={idx} 
-                                     onClick={() => handleSaveGoal(opt.cal)}
-                                     className={`w-full text-left grid grid-cols-12 gap-2 items-center p-3 rounded-2xl cursor-pointer transition-all border outline-none ${isCurrentGoal ? 'border-green-500 shadow-md bg-white ring-2 ring-green-100' : 'border-gray-200 hover:bg-white hover:shadow-sm hover:border-green-300'}`}>
-                                    <div className="col-span-5 md:col-span-4">
-                                        <span className={`inline-block px-2 py-1 rounded-full text-[10px] font-bold ${opt.color}`}>
-                                            {opt.label}
-                                        </span>
-                                    </div>
-                                    <div className="col-span-4 text-center text-[10px] font-bold text-gray-500">
-                                        {opt.rate}
-                                    </div>
-                                    <div className="col-span-3 md:col-span-4 text-right flex items-center justify-end gap-2">
-                                        <span className="font-extrabold text-gray-800 text-sm">{opt.cal.toLocaleString()}</span>
-                                        {isCurrentGoal ? (
-                                            <span className="text-[10px] bg-green-500 text-white px-2 py-1 rounded-lg shadow-sm hidden md:inline-block">✅ เลือกแล้ว</span>
-                                        ) : (
-                                            <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded-lg hidden md:inline-block">เลือก</span>
-                                        )}
-                                    </div>
-                                </button>
-                            )})}
-                        </div>
-                        <p className="text-[11px] text-green-700 font-bold mt-4 text-center bg-green-50 p-2 rounded-xl">👆 คลิกเลือกเป้าหมายด้านบน เพื่อตั้งค่าลิมิตแคลอรี่ประจำวันของคุณ</p>
-                    </div>
-                 )}
+             <div className="bg-slate-50 p-6 rounded-3xl border border-gray-100">
+                 <h3 className="font-bold text-green-800 mb-2">TDEE ของคุณ</h3>
+                 <div className="text-4xl font-extrabold text-gray-800 mb-6">{calculatedTdee || '-'} <span className="text-sm text-gray-500 font-medium">kcal/วัน</span></div>
                  
-                 {saved && (
-                     <div className="mt-4 p-3 bg-green-100 text-green-700 rounded-xl text-center font-bold text-sm border border-green-200 animate-pulse">
-                         ✅ บันทึกเป้าหมายของคุณเรียบร้อยแล้ว
-                     </div>
+                 {calculatedTdee && (
+                    <div className="space-y-2">
+                        {getGoalOptions(calculatedTdee).map((opt, idx) => (
+                            <button key={idx} onClick={() => handleSaveGoal(opt.cal)} className={`w-full text-left flex justify-between items-center p-3 rounded-2xl border ${uTdee.targetCalories === opt.cal ? 'border-green-500 bg-white shadow-md ring-2 ring-green-100' : 'border-gray-200 hover:bg-white'}`}>
+                                <span className={`px-2 py-1 rounded-full text-xs font-bold ${opt.color}`}>{opt.label}</span>
+                                <span className="font-extrabold text-gray-800">{opt.cal.toLocaleString()} kcal</span>
+                            </button>
+                        ))}
+                    </div>
                  )}
+                 {saved && <div className="mt-4 p-3 bg-green-100 text-green-700 rounded-xl text-center font-bold text-sm">✅ บันทึกเป้าหมายแล้ว</div>}
              </div>
-         </div>
-         
-         <div className="mt-8 bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">โปรแกรมคำนวณ TDEE คืออะไร</h3>
-            <p className="text-sm text-gray-600 leading-relaxed">
-                โปรแกรม TDEE Calculator จะ<span className="font-bold">คำนวณพลังงานที่เหมาะสมในแต่ละวัน</span> เช่น ถ้าอยากเพิ่มหรือลดน้ำหนัก ควรกินให้ได้วันละกี่กิโลแคลอรี จะลดหรือเพิ่มน้ำหนักให้ได้ตามเป้าหมาย โดยระบบจะจดจำข้อมูลส่วนตัวของคุณไว้ และจะอัปเดตแคลอรี่เป้าหมายก็ต่อเมื่อคุณคลิกเลือกตารางด้านบนเท่านั้น
-            </p>
-         </div>
       </div>
     );
   };
 
   const RankingBoard = () => {
+    const todayDate = getEffectiveDateString(); // ฟิลเตอร์เฉพาะข้อมูลของวันนี้
+
     const rankedUsers = users.filter(u => u.role === 'user').map(u => {
-      const uFoods = foodLogs.filter(log => log.userId === u.id);
-      const protein = uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0);
-      const calories = uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0);
-      const carbs = uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0);
-      const fat = uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0);
+      const uFoods = foodLogs.filter(log => log.userId === u.id && log.date === todayDate);
+      // ใช้ Math.round เพื่อตัดทศนิยมออกให้ตัวเลขสวยงาม
+      const protein = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.protein) || 0), 0));
+      const calories = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.calories) || 0), 0));
+      const carbs = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.carbs) || 0), 0));
+      const fat = Math.round(uFoods.reduce((sum, log) => sum + (Number(log.fat) || 0), 0));
       return { ...u, protein, calories, carbs, fat };
     }).sort((a,b) => b.protein - a.protein);
 
@@ -1077,8 +934,8 @@ export default function PastelFitApp() {
       <div className="max-w-2xl mx-auto bg-white p-6 rounded-3xl shadow-sm border border-yellow-100">
         <div className="text-center mb-8">
           <span className="text-5xl block mb-3 drop-shadow-md">🏆</span>
-          <h2 className="text-2xl font-bold text-gray-800">กระดานผู้นำสายโปรตีน</h2>
-          <p className="text-sm text-gray-500 mt-1">จัดอันดับจากการทานโปรตีนสะสมทั้งหมด (พร้อมสรุปสารอาหารครบถ้วน)</p>
+          <h2 className="text-2xl font-bold text-gray-800">กระดานผู้นำสายโปรตีนประจำวัน</h2>
+          <p className="text-sm text-gray-500 mt-1">รีเซ็ตข้อมูลใหม่ทุกวันเวลา 04:00 น.</p>
         </div>
         <div className="space-y-4">
           {rankedUsers.map((u, i) => (
@@ -1090,8 +947,8 @@ export default function PastelFitApp() {
               
               <div className="flex-1 w-full flex flex-wrap sm:flex-nowrap justify-between items-center bg-white/80 p-3 rounded-xl border border-gray-100/80 gap-2">
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase">โปรตีนทั้งหมด</span>
-                  <span className="font-extrabold text-blue-600 text-xl flex items-center gap-1">🥩 {u.protein} <span className="text-xs font-bold text-blue-400">กรัม</span></span>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">โปรตีนวันนี้</span>
+                  <span className="font-extrabold text-blue-600 text-xl flex items-center gap-1">🥩 {u.protein} <span className="text-xs font-bold text-blue-400">g</span></span>
                 </div>
                 
                 <div className="flex gap-3 text-right">
@@ -1111,7 +968,7 @@ export default function PastelFitApp() {
               </div>
             </div>
           ))}
-          {rankedUsers.length === 0 && <p className="text-center font-bold text-gray-300 py-6 bg-gray-50 rounded-2xl border border-dashed">ยังไม่มีข้อมูลการบันทึกอาหาร</p>}
+          {rankedUsers.length === 0 && <p className="text-center font-bold text-gray-300 py-6">ยังไม่มีข้อมูลในวันนี้</p>}
         </div>
       </div>
     );
@@ -1159,18 +1016,12 @@ export default function PastelFitApp() {
            
            <div className="bg-white p-5 rounded-3xl shadow-sm border border-indigo-100">
               <h3 className="font-bold text-indigo-900 mb-2 flex items-center gap-2"><span>💬</span> ฝากข้อความถึง {vUser?.name}</h3>
-              <textarea 
-                value={noteInput} 
-                onChange={e => setNoteInput(e.target.value)}
-                placeholder="พิมพ์คำแนะนำ โภชนาการ หรือการออกกำลังกายที่นี่..."
-                className="w-full p-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 outline-none focus:bg-white focus:border-indigo-400 h-24 text-sm"
-              ></textarea>
+              <textarea value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="พิมพ์คำแนะนำ โภชนาการ หรือการออกกำลังกายที่นี่..." className="w-full p-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 outline-none focus:bg-white focus:border-indigo-400 h-24 text-sm"></textarea>
               <div className="flex items-center gap-3 mt-3">
                 <button onClick={saveCoachNote} className="bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-6 rounded-xl shadow-sm transition">ส่งคำแนะนำ</button>
                 {saveStatus && <span className="text-sm font-bold text-green-600">{saveStatus}</span>}
               </div>
            </div>
-
            <Dashboard targetUserId={viewingUserId} />
            <MeasurementTracker targetUserId={viewingUserId} />
          </div>
@@ -1182,58 +1033,31 @@ export default function PastelFitApp() {
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-8 rounded-[2rem] text-white shadow-lg flex justify-between items-center">
            <div>
              <h1 className="text-3xl font-extrabold mb-2">ยินดีต้อนรับ, {currentUser.name}</h1>
-             <p className="opacity-90 text-sm font-medium">จัดการบัญชีผู้ใช้งาน เพิ่มโค้ช และตรวจสอบข้อมูลบันทึกของสมาชิก</p>
+             <p className="opacity-90 text-sm font-medium">จัดการบัญชีผู้ใช้งาน และตรวจสอบข้อมูลสมาชิก</p>
            </div>
-           <div className="text-6xl opacity-80 hidden md:block drop-shadow-md">🛡️</div>
+           <div className="text-6xl opacity-80 hidden md:block">🛡️</div>
         </div>
 
-        <div className="bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-gray-100">
-           <h2 className="text-xl font-bold mb-4 flex items-center gap-2"><span>👥</span> เพิ่มบัญชีใหม่</h2>
+        <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
            <form onSubmit={handleCreateAccount} className="flex gap-3 mb-8 flex-wrap bg-slate-50 p-5 rounded-2xl border border-gray-100">
-             <div className="flex-1 min-w-[150px]">
-               <label className="text-[10px] font-bold text-gray-500 mb-1 block uppercase">ชื่อที่แสดง</label>
-               <input placeholder="เช่น น้องพาสเทล" required value={newAccount.name} onChange={e=>setNewAccount({...newAccount, name: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400 font-bold" />
-             </div>
-             <div className="w-[120px] sm:w-[150px]">
-               <label className="text-[10px] font-bold text-gray-500 mb-1 block uppercase">รหัสผ่าน</label>
-               <input placeholder="ตั้งรหัส" required value={newAccount.password} onChange={e=>setNewAccount({...newAccount, password: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400 font-bold" />
-             </div>
-             <div className="w-[120px]">
-               <label className="text-[10px] font-bold text-gray-500 mb-1 block uppercase">สิทธิ์ผู้ใช้</label>
-               <select value={newAccount.role} onChange={e=>setNewAccount({...newAccount, role: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl outline-none focus:border-blue-400 bg-white font-bold text-gray-700">
-                 <option value="user">สมาชิก</option>
-                 <option value="coach">โค้ช</option>
-                 {currentUser.role === 'admin' && <option value="admin">แอดมิน</option>}
-               </select>
-             </div>
-             <div className="flex items-end w-full sm:w-auto mt-2 sm:mt-0">
-               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold shadow-md transition sm:h-[46px]">+ สร้าง</button>
-             </div>
+             <input placeholder="ชื่อผู้ใช้" required value={newAccount.name} onChange={e=>setNewAccount({...newAccount, name: e.target.value})} className="flex-1 min-w-[150px] p-3 border rounded-xl font-bold" />
+             <input placeholder="รหัสผ่าน" required value={newAccount.password} onChange={e=>setNewAccount({...newAccount, password: e.target.value})} className="w-[120px] p-3 border rounded-xl font-bold" />
+             <select value={newAccount.role} onChange={e=>setNewAccount({...newAccount, role: e.target.value})} className="w-[100px] p-3 border rounded-xl font-bold bg-white">
+                 <option value="user">สมาชิก</option><option value="coach">โค้ช</option>{currentUser.role === 'admin' && <option value="admin">แอดมิน</option>}
+             </select>
+             <button type="submit" className="bg-blue-600 text-white px-6 rounded-xl font-bold">สร้าง</button>
            </form>
 
-           <h3 className="font-bold text-gray-800 mb-4 flex items-center gap-2">รายชื่อในระบบ <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">{users.filter(u => u.id !== currentUser.id).length}</span></h3>
            <div className="space-y-3">
              {users.filter(u => u.id !== currentUser.id).map(u => (
-               <div key={u.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 bg-white border border-gray-100 rounded-2xl hover:border-blue-200 transition shadow-sm gap-4">
-                 <div className="flex items-center gap-4">
-                   <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-xl text-white shadow-sm ${u.role === 'admin' ? 'bg-purple-500' : u.role === 'coach' ? 'bg-blue-500' : 'bg-pink-400'}`}>
-                     {u.name.charAt(0)}
-                   </div>
-                   <div>
-                     <p className="font-bold text-gray-800 text-lg">{u.name}</p>
-                     <p className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-md inline-block mt-1">
-                       {u.role === 'admin' ? 'แอดมิน' : u.role === 'coach' ? 'โค้ชประจำกลุ่ม' : 'สมาชิกทั่วไป'}
-                     </p>
-                   </div>
+               <div key={u.id} className="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-2xl">
+                 <div>
+                     <p className="font-bold">{u.name}</p>
+                     <p className="text-[10px] text-gray-500">{u.role}</p>
                  </div>
-                 <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-                   {u.role === 'user' && (
-                     <button onClick={() => { setViewingUserId(u.id); setNoteInput(coachNotes[u.id] || ''); }} className="text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-xl font-bold transition flex-1 sm:flex-none text-center border border-indigo-100">ดูข้อมูล & แนะนำ</button>
-                   )}
-                   <button onClick={() => {
-                       if(isLocal) setUsers(prev => prev.filter(x => x.id !== u.id));
-                       else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id));
-                   }} className="text-sm text-gray-400 hover:text-red-500 hover:bg-red-50 px-3 py-2 bg-gray-50 rounded-xl transition border border-transparent hover:border-red-100">ลบ</button>
+                 <div className="flex gap-2">
+                   {u.role === 'user' && <button onClick={() => { setViewingUserId(u.id); setNoteInput(coachNotes[u.id] || ''); }} className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl font-bold">ดูข้อมูล</button>}
+                   <button onClick={() => { if(isLocal) setUsers(prev => prev.filter(x => x.id !== u.id)); else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id)); }} className="text-sm text-red-500 bg-red-50 px-3 rounded-xl font-bold">ลบ</button>
                  </div>
                </div>
              ))}
@@ -1245,9 +1069,7 @@ export default function PastelFitApp() {
 
   return (
     <Layout>
-      {currentUser.role === 'coach' || currentUser.role === 'admin' ? (
-        <AdminDashboard />
-      ) : (
+      {currentUser.role === 'coach' || currentUser.role === 'admin' ? <AdminDashboard /> : (
         <div className="pb-10">
           {activeTab === 'dashboard' && <Dashboard />}
           {activeTab === 'ai' && <AIFoodScanner />}
