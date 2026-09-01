@@ -64,7 +64,6 @@ export default function PastelFitApp() {
   const [measurements, setMeasurements] = useState([]);
   const [tdeeData, setTdeeData] = useState({});
   const [coachNotes, setCoachNotes] = useState({});
-  const [chatMessages, setChatMessages] = useState([]);
 
   useEffect(() => {
     if (isLocalMode) {
@@ -92,15 +91,12 @@ export default function PastelFitApp() {
       setUsers(INITIAL_USERS);
       setTdeeData({});
       setCoachNotes({});
-      setChatMessages([
-        { id: 'msg1', senderName: 'Admin', text: 'ยินดีต้อนรับสู่ Fit for Health สอบถามพูดคุยได้เลยค่ะ 🌸', timestamp: new Date().toISOString() }
-      ]);
       return;
     }
 
     if (!firebaseUser) return;
 
-    const refs = ['users', 'foodLogs', 'exerciseLogs', 'measurements', 'tdeeData', 'coachNotes', 'chatMessages'].map(
+    const refs = ['users', 'foodLogs', 'exerciseLogs', 'measurements', 'tdeeData', 'coachNotes'].map(
       col => collection(db, 'artifacts', appId, 'public', 'data', col)
     );
 
@@ -123,31 +119,9 @@ export default function PastelFitApp() {
     const unsubNotes = onSnapshot(refs[5], (snap) => {
       const obj = {}; snap.docs.forEach(d => obj[d.id] = d.data().text); setCoachNotes(obj);
     });
-    const unsubChat = onSnapshot(refs[6], (snap) => {
-      setChatMessages(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=> new Date(a.timestamp) - new Date(b.timestamp)));
-    }, console.error);
 
-    return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); unsubChat(); };
+    return () => { unsubUsers(); unsubFood(); unsubEx(); unsubMeas(); unsubTdee(); unsubNotes(); };
   }, [firebaseUser, isOfflineMode]);
-
-  useEffect(() => {
-    // ลบข้อความที่เก่ากว่า 5 นาที ออกจากระบบอัตโนมัติ
-    const cleanupInterval = setInterval(() => {
-      const cutoffTime = new Date().getTime() - (5 * 60 * 1000); // 5 นาทีที่แล้ว
-      
-      if (isOfflineMode) {
-        setChatMessages(prev => prev.filter(msg => new Date(msg.timestamp).getTime() >= cutoffTime));
-      } else if (db) {
-        chatMessages.forEach(msg => {
-          if (new Date(msg.timestamp).getTime() < cutoffTime) {
-            deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chatMessages', msg.id)).catch(() => {});
-          }
-        });
-      }
-    }, 60000); // ตรวจสอบเคลียร์ข้อมูลทุกๆ 1 นาที
-
-    return () => clearInterval(cleanupInterval);
-  }, [chatMessages, isOfflineMode]);
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -161,26 +135,10 @@ export default function PastelFitApp() {
   };
 
   if (!currentUser) {
-    const handleSendChat = (e) => {
-      e.preventDefault();
-      const name = e.target.chatName.value.trim();
-      const text = e.target.chatText.value.trim();
-      if (!name || !text) return;
-      
-      const newMsg = {
-        id: generateId(),
-        senderName: name,
-        text: text,
-        timestamp: new Date().toISOString()
-      };
-      
-      if (isOfflineMode) {
-        setChatMessages(prev => [...prev, newMsg]);
-      } else {
-        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'chatMessages', newMsg.id), newMsg);
-      }
-      e.target.chatText.value = '';
-    };
+    const todayDate = getEffectiveDateString();
+    const todayPublicFoods = foodLogs
+      .filter(log => log.date === todayDate)
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-pink-50 py-10 font-sans flex flex-col items-center px-4 overflow-y-auto">
@@ -196,36 +154,35 @@ export default function PastelFitApp() {
              </form>
            </div>
 
-           <div className="bg-white p-6 rounded-3xl shadow-lg w-full max-w-md border border-blue-100 flex flex-col shrink-0">
+           <div className="bg-white p-6 rounded-3xl shadow-lg w-full max-w-md border border-blue-100 flex flex-col shrink-0 max-h-[500px]">
              <div className="flex items-center gap-2 mb-4 justify-center">
-               <span className="text-2xl">💬</span>
-               <h3 className="text-xl font-bold text-gray-800">กระดานพูดคุย (Public)</h3>
+               <span className="text-2xl">🍽️</span>
+               <h3 className="text-xl font-bold text-gray-800">เมนูอาหารวันนี้ของทุกคน</h3>
              </div>
              
-             {}
-             <div className="bg-slate-50 flex-1 rounded-2xl p-4 mb-4 h-64 overflow-y-auto border border-gray-100 flex flex-col gap-3">
-               {chatMessages.length === 0 ? (
-                 <p className="text-center text-gray-400 text-sm mt-10 font-medium">ยังไม่มีข้อความ... เริ่มพูดคุยเลย!</p>
+             <div className="bg-slate-50 flex-1 rounded-2xl p-4 overflow-y-auto border border-gray-100 flex flex-col gap-3">
+               {todayPublicFoods.length === 0 ? (
+                 <p className="text-center text-gray-400 text-sm mt-10 font-medium">ยังไม่มีใครบันทึกอาหารวันนี้เลย</p>
                ) : (
-                 chatMessages.slice(-5).map(msg => (
-                   <div key={msg.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-left animate-fade-in">
-                     <div className="flex justify-between items-baseline mb-1">
-                       <span className="font-bold text-sm text-blue-600">{msg.senderName}</span>
-                       <span className="text-[10px] text-gray-400">{new Date(msg.timestamp).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
+                 todayPublicFoods.map(log => {
+                   const author = users.find(u => u.id === log.userId)?.name || 'สมาชิกไม่ทราบชื่อ';
+                   return (
+                     <div key={log.id} className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 text-left animate-fade-in flex justify-between items-center">
+                       <div>
+                         <div className="flex items-baseline gap-2 mb-1">
+                           <span className="font-bold text-sm text-blue-600">{author}</span>
+                           <span className="text-[10px] text-gray-400">{new Date(log.timestamp).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit'})}</span>
+                         </div>
+                         <p className="text-sm font-bold text-gray-700">{log.name}</p>
+                       </div>
+                       <div className="text-right">
+                          <p className="font-extrabold text-pink-500 text-sm">{Math.round(log.calories)} <span className="text-[10px] font-normal">kcal</span></p>
+                       </div>
                      </div>
-                     <p className="text-sm text-gray-700 break-words">{msg.text}</p>
-                   </div>
-                 ))
+                   );
+                 })
                )}
              </div>
-             
-             <form onSubmit={handleSendChat} className="flex flex-col gap-2">
-               <input type="text" name="chatName" placeholder="ชื่อของคุณ" required className="w-full p-3 bg-gray-50 rounded-xl outline-none border border-gray-200 text-sm font-medium" />
-               <div className="flex gap-2">
-                 <input type="text" name="chatText" placeholder="พิมพ์ข้อความ..." required className="w-full p-3 bg-gray-50 rounded-xl outline-none border border-gray-200 text-sm flex-1 font-medium" />
-                 <button type="submit" className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-4 py-3 rounded-xl shadow-md transition">ส่ง</button>
-               </div>
-             </form>
            </div>
       </div>
     );
