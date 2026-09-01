@@ -25,9 +25,6 @@ const formatDate = (dateString) => {
 };
 
 const INITIAL_USERS = [
-  { id: 'u1', name: 'น้องพาสเทล', role: 'user', password: '123' },
-  { id: 'u2', name: 'คุณสมชาย', role: 'user', password: '123' },
-  { id: 'c1', name: 'โค้ชใจดี', role: 'coach', password: '123' },
   { id: 'admin1', name: 'Admin (ผู้ดูแลระบบ)', role: 'admin', password: 'admin' }
 ];
 
@@ -93,15 +90,10 @@ export default function PastelFitApp() {
   useEffect(() => {
     if (isOfflineMode) {
       setUsers(INITIAL_USERS);
-      setTdeeData({
-        'u1': { targetCalories: 1505, profile: { weight: 55, height: 160, age: 25, gender: 'female', activityLevel: '1.2' } },
-        'u2': { targetCalories: 2279, profile: { weight: 80, height: 175, age: 30, gender: 'male', activityLevel: '1.55' } }
-      });
-      setCoachNotes({
-        'u1': 'วันนี้ทานโปรตีนน้อยไปนิดนึงนะคะ พรุ่งนี้ลองเพิ่มไข่ต้มสัก 2 ฟองค่ะ 💪'
-      });
+      setTdeeData({});
+      setCoachNotes({});
       setChatMessages([
-        { id: 'msg1', senderName: 'Admin', text: 'ยินดีต้อนรับสู่ PastelFit สอบถามพูดคุยได้เลยค่ะ 🌸', timestamp: new Date().toISOString() }
+        { id: 'msg1', senderName: 'Admin', text: 'ยินดีต้อนรับสู่ Fit for Health สอบถามพูดคุยได้เลยค่ะ 🌸', timestamp: new Date().toISOString() }
       ]);
       return;
     }
@@ -159,11 +151,12 @@ export default function PastelFitApp() {
 
   const handleLogin = (e) => {
     e.preventDefault();
-    const user = users.find(u => u.id === e.target.userId.value);
+    const inputId = e.target.userId.value.trim();
+    const user = users.find(u => u.id === inputId || u.name === inputId);
     if (user && user.password === e.target.password.value) {
       setCurrentUser(user); setActiveTab('dashboard'); setLoginError('');
     } else {
-      setLoginError(user ? 'รหัสผ่านไม่ถูกต้อง' : 'กรุณาเลือกบัญชีผู้ใช้งาน');
+      setLoginError(user ? 'รหัสผ่านไม่ถูกต้อง' : 'ไม่พบชื่อผู้ใช้งานนี้');
     }
   };
 
@@ -193,15 +186,12 @@ export default function PastelFitApp() {
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-pink-50 py-10 font-sans flex flex-col items-center px-4 overflow-y-auto">
            <div className="bg-white p-8 rounded-3xl shadow-xl w-full max-w-md text-center border border-pink-100 mb-8 shrink-0">
              <div className="text-5xl mb-4">🌸</div>
-             <h2 className="text-2xl font-bold text-gray-800 mb-2">PastelFit</h2>
+             <h2 className="text-2xl font-bold text-gray-800 mb-2">Fit for Health</h2>
              <p className="text-gray-500 mb-6">เข้าสู่ระบบเพื่อใช้งาน</p>
              {loginError && <div className="bg-red-50 text-red-500 p-3 rounded-xl mb-4 text-sm font-semibold border border-red-100">{loginError}</div>}
              <form onSubmit={handleLogin} className="space-y-4">
-               <select name="userId" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200">
-                 <option value="">-- เลือกบัญชีผู้ใช้งาน --</option>
-                 {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
-               </select>
-               <input type="password" name="password" placeholder="รหัสผ่าน (User=123, Admin=admin)" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200" />
+               <input type="text" name="userId" placeholder="ชื่อผู้ใช้ หรือ ID" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200" required />
+               <input type="password" name="password" placeholder="รหัสผ่าน" className="w-full p-4 bg-gray-50 rounded-2xl outline-none border border-gray-200" required />
                <button type="submit" className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-2xl shadow-md transition transform hover:-translate-y-1">เข้าสู่ระบบ</button>
              </form>
            </div>
@@ -245,7 +235,7 @@ export default function PastelFitApp() {
     <div className="min-h-screen bg-slate-50 pt-16 pb-20 md:pb-0">
       <nav className="bg-white shadow-sm fixed w-full top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 flex justify-between items-center h-16">
-          <div className="flex items-center gap-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">🌸 PastelFit</div>
+          <div className="flex items-center gap-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-blue-500">🌸 Fit for Health</div>
           <div className="flex items-center gap-4">
             <span className="text-gray-600 text-sm font-medium">{currentUser.name}</span>
             <button onClick={() => setCurrentUser(null)} className="text-sm text-pink-500 hover:text-pink-600 font-medium bg-pink-50 px-3 py-1 rounded-full">ออก</button>
@@ -612,7 +602,7 @@ export default function PastelFitApp() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
                 {['weight', 'chest', 'waist', 'arm', 'leg', 'neck'].map((field) => (
                    <div key={field}>
-                     <label className="text-xs font-bold text-purple-800 block mb-1">{field === 'weight' ? 'น้ำหนัก (กก.) *' : `รอบ${field==='chest'?'อก':field==='waist'?'เอว':field==='arm'?'แขน':field==='leg'?'ขา':'คอ'} (นิ้ว)`}</label>
+                     <label className="text-xs font-bold text-purple-800 block mb-1">{field === 'weight' ? 'น้ำหนัก (กก.) *' : `รอบ${field==='chest'?'อก':field==='waist'?'เอว':field==='arm'?'แขน':field==='leg'?'ขา':'คอ'} (ซม.)`}</label>
                      <input type="number" step="0.1" value={form[field]} onChange={e=>setForm({...form, [field]: e.target.value})} className="w-full p-3 rounded-xl border border-purple-200 outline-none focus:border-purple-400 font-bold text-purple-900" placeholder="0.0" />
                    </div>
                 ))}
@@ -630,7 +620,7 @@ export default function PastelFitApp() {
                      {!isReadOnly && <button onClick={() => { if(isLocal) setMeasurements(prev => prev.filter(x => x.id !== m.id)); else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'measurements', m.id)); }} className="text-xs text-red-400 hover:text-red-600">ลบข้อมูล</button>}
                   </div>
                   <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center bg-gray-50 p-3 rounded-xl">
-                     {[{l:'น้ำหนัก',v:m.weight,u:'กก.'}, {l:'รอบอก',v:m.chest,u:'นิ้ว'}, {l:'รอบเอว',v:m.waist,u:'นิ้ว'}, {l:'รอบแขน',v:m.arm,u:'นิ้ว'}, {l:'รอบขา',v:m.leg,u:'นิ้ว'}, {l:'รอบคอ',v:m.neck,u:'นิ้ว'}].map((item, i) => (
+                     {[{l:'น้ำหนัก',v:m.weight,u:'กก.'}, {l:'รอบอก',v:m.chest,u:'ซม.'}, {l:'รอบเอว',v:m.waist,u:'ซม.'}, {l:'รอบแขน',v:m.arm,u:'ซม.'}, {l:'รอบขา',v:m.leg,u:'ซม.'}, {l:'รอบคอ',v:m.neck,u:'ซม.'}].map((item, i) => (
                        <div key={i} className="bg-white p-2 rounded-lg shadow-sm">
                          <p className="text-[10px] font-bold text-gray-500 uppercase">{item.l}</p>
                          <p className="font-bold text-purple-600 text-sm">{item.v || '-'} <span className="text-[10px] font-normal text-gray-400">{item.u}</span></p>
@@ -996,6 +986,7 @@ export default function PastelFitApp() {
 
   const AdminDashboard = () => {
     const [newAccount, setNewAccount] = useState({ name: '', password: '', role: 'user' });
+    const [editingUser, setEditingUser] = useState(null);
     const [noteInput, setNoteInput] = useState('');
     const [saveStatus, setSaveStatus] = useState('');
 
@@ -1013,6 +1004,16 @@ export default function PastelFitApp() {
           if(newAccount.role === 'user') setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tdeeData', id), { targetCalories: 2000, profile: defaultProfile });
       }
       setNewAccount({ name: '', password: '', role: 'user' });
+    };
+
+    const handleUpdateAccount = (e) => {
+      e.preventDefault();
+      if (isLocal) {
+          setUsers(prev => prev.map(u => u.id === editingUser.id ? editingUser : u));
+      } else {
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', editingUser.id), editingUser, { merge: true });
+      }
+      setEditingUser(null);
     };
 
     const saveCoachNote = () => {
@@ -1068,21 +1069,54 @@ export default function PastelFitApp() {
              <button type="submit" className="bg-blue-600 text-white px-6 rounded-xl font-bold">สร้าง</button>
            </form>
 
+           {}
            <div className="space-y-3">
              {users.filter(u => u.id !== currentUser.id).map(u => (
-               <div key={u.id} className="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-2xl">
+               <div key={u.id} className="flex justify-between items-center p-4 bg-white border border-gray-100 rounded-2xl flex-wrap gap-2">
                  <div>
                      <p className="font-bold">{u.name}</p>
                      <p className="text-[10px] text-gray-500">{u.role}</p>
                  </div>
                  <div className="flex gap-2">
-                   {u.role === 'user' && <button onClick={() => { setViewingUserId(u.id); setNoteInput(coachNotes[u.id] || ''); }} className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl font-bold">ดูข้อมูล</button>}
-                   <button onClick={() => { if(isLocal) setUsers(prev => prev.filter(x => x.id !== u.id)); else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id)); }} className="text-sm text-red-500 bg-red-50 px-3 rounded-xl font-bold">ลบ</button>
+                   {u.role === 'user' && <button onClick={() => { setViewingUserId(u.id); setNoteInput(coachNotes[u.id] || ''); }} className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl font-bold shadow-sm">ดูข้อมูล</button>}
+                   <button onClick={() => setEditingUser(u)} className="text-sm text-orange-600 bg-orange-50 px-4 py-2 rounded-xl font-bold shadow-sm">แก้ไข</button>
+                   <button onClick={() => { if(isLocal) setUsers(prev => prev.filter(x => x.id !== u.id)); else deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'users', u.id)); }} className="text-sm text-red-500 bg-red-50 px-3 py-2 rounded-xl font-bold shadow-sm">ลบ</button>
                  </div>
                </div>
              ))}
            </div>
         </div>
+
+        {}
+        {editingUser && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="bg-white p-6 rounded-[2rem] w-full max-w-sm shadow-xl animate-fade-in">
+              <h3 className="text-xl font-bold mb-4 text-gray-800">แก้ไขผู้ใช้งาน</h3>
+              <form onSubmit={handleUpdateAccount} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-1">ชื่อผู้ใช้</label>
+                  <input value={editingUser.name} onChange={e=>setEditingUser({...editingUser, name: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-blue-400 font-medium" required />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-1">รหัสผ่าน</label>
+                  <input value={editingUser.password} onChange={e=>setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-gray-50 focus:bg-white outline-none focus:border-blue-400 font-medium" required />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-gray-700 block mb-1">สิทธิ์การใช้งาน</label>
+                  <select value={editingUser.role} onChange={e=>setEditingUser({...editingUser, role: e.target.value})} className="w-full p-3 border border-gray-200 rounded-xl bg-white font-medium outline-none focus:border-blue-400">
+                    <option value="user">สมาชิก (User)</option>
+                    <option value="coach">โค้ช (Coach)</option>
+                    {currentUser.role === 'admin' && <option value="admin">ผู้ดูแลระบบ (Admin)</option>}
+                  </select>
+                </div>
+                <div className="flex gap-2 pt-4">
+                  <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold shadow-sm transition">บันทึก</button>
+                  <button type="button" onClick={() => setEditingUser(null)} className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl font-bold transition">ยกเลิก</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
